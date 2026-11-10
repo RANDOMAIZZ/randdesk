@@ -1181,21 +1181,29 @@
       const grants = acc.grants || {};
       const save = async (body) => { await api('POST', '/api/access', body); };
       const others = devs.filter((d) => !d.self);
+      // управлять можно и главным ПК — он идёт первым столбцом
+      const targets = [...devs.filter((d) => d.self), ...others];
       const clipCard = h('div', { class: 'card' }, h('h3', null, 'Единый буфер обмена'),
         toggle('Общий буфер обмена для всех ПК', 'Текст, скопированный на одном ПК, можно вставить на любом другом. Отдельный ПК можно исключить на его странице.',
           acc.clip_shared, async (on) => { await save({ clip_shared: on }); toast(on ? 'Общий буфер обмена включён' : 'Общий буфер обмена выключен', 'ok'); }));
-      if (others.length < 2) {
-        box.replaceChildren(clipCard, h('div', { class: 'card', style: { marginTop: '14px' } }, h('h3', null, 'Управление друг другом'),
-          h('p', { class: 'muted' }, others.length ? 'Подключите ещё один ПК — тогда здесь можно будет разрешить им управлять друг другом.' : 'Пока к главному ПК не подключён ни один обычный ПК.')));
+      if (!others.length) {
+        box.replaceChildren(clipCard, h('div', { class: 'card', style: { marginTop: '14px' } }, h('h3', null, 'Кто кем управляет'),
+          h('p', { class: 'muted' }, 'Пока к главному ПК не подключён ни один обычный ПК.')));
         return;
       }
       const table = h('table', { class: 'tbl access' },
-        h('thead', null, h('tr', null, h('th', null, 'Кто управляет ↓ / кем →'), others.map((t) => h('th', { class: 'center' }, t.name)))),
+        h('thead', null, h('tr', null, h('th', null, 'Кто управляет ↓ / кем →'),
+          targets.map((t) => h('th', { class: 'center' }, t.name, t.self ? h('div', { class: 'muted small' }, 'главный ПК') : null)))),
         h('tbody', null, others.map((from) => h('tr', null, h('th', null, from.name, from.online ? '' : h('span', { class: 'muted small' }, ' · не в сети')),
-          others.map((to) => {
+          targets.map((to) => {
             if (to.id === from.id) return h('td', { class: 'center muted' }, '—');
             const cb = h('input', { type: 'checkbox', checked: (grants[from.id] || []).includes(to.id), title: `${from.name} может управлять ${to.name}` });
             cb.addEventListener('change', async () => {
+              if (cb.checked && to.self && !await confirmDlg('Разрешить управлять главным ПК?',
+                `С ПК «${from.name}» можно будет открыть рабочий стол, консоль и процессы главного ПК. Сам раздел администратора RandDesk ему недоступен, но через рабочий стол он увидит всё, что открыто на главном ПК (в том числе открытую панель RandDesk).`, 'Разрешить', 'danger')) {
+                cb.checked = false;
+                return;
+              }
               const list = new Set(grants[from.id] || []);
               cb.checked ? list.add(to.id) : list.delete(to.id);
               try {
@@ -1206,9 +1214,9 @@
             });
             return h('td', { class: 'center' }, cb);
           })))));
-      box.replaceChildren(clipCard, h('div', { class: 'card', style: { marginTop: '14px' } }, h('h3', null, 'Управление друг другом'),
+      box.replaceChildren(clipCard, h('div', { class: 'card', style: { marginTop: '14px' } }, h('h3', null, 'Кто кем управляет'),
         h('div', { class: 'table-wrap' }, table),
-        h('p', { class: 'muted small', style: { marginTop: '10px' } }, 'Разрешённый ПК видит выбранные ПК на своей странице RandDesk (http://localhost:8420) и может открыть их рабочий стол, консоль и т. д. Главный ПК управляет всеми всегда.')));
+        h('p', { class: 'muted small', style: { marginTop: '10px' } }, 'Разрешённый ПК видит выбранные ПК на своей странице RandDesk (http://localhost:8420) и может открыть их рабочий стол, консоль и т. д. Главный ПК управляет всеми всегда. Панель администратора (настройки, разрешения, отключение ввода) доступна только на главном ПК.')));
     };
     load().catch((e) => toast(e.message, 'bad'));
     return null;

@@ -201,3 +201,6 @@ func defaultDataDir() string {
 func (h *Hub) CreateAdmin(login, password string) error {
 	return h.srv.store.CreateUser(login, password, true)
 }
+
+// URLs — адреса этого хаба (локальные и внешние).
+func (h *Hub) URLs() []string { return h.srv.hubURLs() }

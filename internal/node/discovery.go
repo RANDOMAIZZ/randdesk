@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -24,6 +25,9 @@ type beacon struct {
 	FP    string `json:"fp,omitempty"`
 	Port  int    `json:"p,omitempty"`
 	Name  string `json:"n,omitempty"`
+	// Addrs — настоящие адреса главного ПК: если между подсетями стоит роутер с NAT,
+	// ответ приходит с адреса роутера, а подключаться нужно к одному из этих.
+	Addrs []string `json:"a,omitempty"`
 }
 
 // broadcastAddrs — широковещательные адреса всех сетей этого ПК.
@@ -101,7 +105,7 @@ func announcer(stop <-chan struct{}, udpPort int, me func() beacon) {
 }
 
 // seeker — обычный ПК: ищет главный ПК своей группы; found вызывается с адресом хаба.
-func seeker(stop <-chan struct{}, udpPort int, group, login string, fast func() bool, found func(url, fp, name string), mismatch func(name string)) {
+func seeker(stop <-chan struct{}, udpPort int, group, login string, fast func() bool, found func(urls []string, fp, name string), mismatch func(name string)) {
 	conn, err := net.ListenUDP("udp4", &net.UDPAddr{})
 	if err != nil {
 		log.Printf("поиск ПК: %v", err)
@@ -127,14 +131,32 @@ func seeker(stop <-chan struct{}, udpPort int, group, login string, fast func() 
 			if b.Type != "here" || b.Group != group || b.Port == 0 {
 				continue
 			}
-			found("https://"+net.JoinHostPort(from.IP.String(), strconv.Itoa(b.Port)), b.FP, b.Name)
+			urls := []string{"https://" + net.JoinHostPort(from.IP.String(), strconv.Itoa(b.Port))}
+			for _, a := range b.Addrs {
+				if strings.HasPrefix(a, "https://") && a != urls[0] && len(urls) < 10 {
+					urls = append(urls, a)
+				}
+			}
+			found(urls, b.FP, b.Name)
 		}
 	}
 	go handle(conn)
 	probe, _ := json.Marshal(beacon{RD: 1, Type: "probe", Group: group, Login: login})
-	for {
+	var sweeping atomic.Bool
+	var lastSweep time.Time
+	for round := 0; ; round++ {
 		for _, a := range broadcastAddrs(udpPort) {
 			conn.WriteToUDP(probe, a)
+		}
+		// широковещание не проходит между подсетями (192.168.10.x ↔ 192.168.40.x):
+		// если главный ПК не ответил, опрашиваем соседние подсети своей частной сети
+		if fast() && round >= 3 && !sweeping.Load() && time.Since(lastSweep) > 5*time.Minute {
+			lastSweep = time.Now()
+			sweeping.Store(true)
+			go func() {
+				defer sweeping.Store(false)
+				sweep(stop, conn, probe, udpPort, fast)
+			}()
 		}
 		wait := 30 * time.Second
 		if fast() {
@@ -146,6 +168,114 @@ func seeker(stop <-chan struct{}, udpPort int, group, login string, fast func() 
 		case <-time.After(wait):
 		}
 	}
+}
+
+// sweepNets — подсети /24 для поиска главного ПК: все /24 в пределах /16 каждой частной сети
+// этого ПК, ближайшие к своей — первыми.
+func sweepNets() [][3]byte {
+	type pref struct{ a, b, c byte }
+	var own []pref
+	seen16 := map[[2]byte]bool{}
+	ifs, _ := net.Interfaces()
+	for _, ifc := range ifs {
+		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, _ := ifc.Addrs()
+		for _, a := range addrs {
+			ipn, ok := a.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			ip := ipn.IP.To4()
+			if ip == nil || !ip.IsPrivate() {
+				continue // только 10/8, 172.16/12, 192.168/16 — не VPN и не интернет
+			}
+			own = append(own, pref{ip[0], ip[1], ip[2]})
+		}
+	}
+	var out [][3]byte
+	seen := map[[3]byte]bool{}
+	for _, p := range own {
+		if seen16[[2]byte{p.a, p.b}] {
+			continue
+		}
+		seen16[[2]byte{p.a, p.b}] = true
+		for d := 0; d < 256; d++ { // от своей подсети в обе стороны
+			for _, c := range []int{int(p.c) - d, int(p.c) + d} {
+				if c < 0 || c > 255 {
+					continue
+				}
+				k := [3]byte{p.a, p.b, byte(c)}
+				if !seen[k] {
+					seen[k] = true
+					out = append(out, k)
+				}
+			}
+		}
+	}
+	return out
+}
+
+// sweep рассылает запрос каждому адресу соседних подсетей (≈4000 пакетов в секунду, до 65 тыс.
+// адресов на одну частную сеть). Останавливается, как только главный ПК найден.
+func sweep(stop <-chan struct{}, conn *net.UDPConn, probe []byte, udpPort int, active func() bool) {
+	nets := sweepNets()
+	if len(nets) == 0 {
+		return
+	}
+	log.Printf("поиск главного ПК в соседних подсетях (%d подсетей)…", len(nets))
+	sent := 0
+	for _, n := range nets {
+		for d := 1; d < 255; d++ {
+			conn.WriteToUDP(probe, &net.UDPAddr{IP: net.IPv4(n[0], n[1], n[2], byte(d)), Port: udpPort})
+			sent++
+			if sent%16 == 0 {
+				select {
+				case <-stop:
+					return
+				case <-time.After(4 * time.Millisecond):
+				}
+				if !active() {
+					return
+				}
+			}
+		}
+	}
+}
+
+// firstReachable — первый по порядку адрес, до которого доходит TCP-соединение
+// (все проверяются одновременно, не дольше 4 с).
+func firstReachable(urls []string) string {
+	type res struct {
+		i  int
+		ok bool
+	}
+	ch := make(chan res, len(urls))
+	for i, u := range urls {
+		go func(i int, u string) {
+			host := strings.TrimPrefix(u, "https://")
+			c, err := net.DialTimeout("tcp", host, 4*time.Second)
+			if err == nil {
+				c.Close()
+			}
+			ch <- res{i, err == nil}
+		}(i, u)
+	}
+	ok := make([]bool, len(urls))
+	for range urls {
+		r := <-ch
+		ok[r.i] = r.ok
+		if r.ok && r.i == 0 {
+			break
+		}
+	}
+	for i := range ok {
+		if ok[i] {
+			return urls[i]
+		}
+	}
+	return ""
 }
 
 // loginHash — короткий хэш логина для подсказки о несовпадающем пароле.

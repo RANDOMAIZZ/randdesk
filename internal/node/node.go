@@ -239,7 +239,7 @@ func (n *node) runAdmin(stop <-chan struct{}) error {
 	}
 	go announcer(stop, n.o.UDPPort, func() beacon {
 		acc := n.st.get().Account
-		return beacon{RD: 1, Type: "here", Group: acc.Group, Login: loginHash(acc.Login), FP: h.Fingerprint, Port: h.Port, Name: hostname()}
+		return beacon{RD: 1, Type: "here", Group: acc.Group, Login: loginHash(acc.Login), FP: h.Fingerprint, Port: h.Port, Name: hostname(), Addrs: h.URLs()}
 	})
 	// главный ПК тоже виден в своей панели как устройство
 	go func() {
@@ -329,18 +329,28 @@ func (n *node) runMember(parent <-chan struct{}) error {
 	var lastTry sync.Map
 	go seeker(stop, n.o.UDPPort, acc.Group, loginHash(acc.Login),
 		func() bool { return n.getLink() == nil },
-		func(u, fp, name string) {
+		func(urls []string, fp, name string) {
 			if a := n.getLink(); a != nil {
 				if c := a.Config(); fp != "" && fp == c.Fingerprint {
-					a.AddHubs(u) // главный ПК найден в этой сети — используем прямой адрес
+					if u := firstReachable(urls); u != "" {
+						a.AddHubs(u) // главный ПК найден в этой сети — используем прямой адрес
+					}
 				}
 				return
 			}
-			if t, ok := lastTry.Load(u); ok && time.Since(t.(time.Time)) < 10*time.Second {
+			key := fp + "|" + urls[0]
+			if t, ok := lastTry.Load(key); ok && time.Since(t.(time.Time)) < 10*time.Second {
 				return
 			}
-			lastTry.Store(u, time.Now())
-			go n.tryPair(stop, u, name)
+			lastTry.Store(key, time.Now())
+			go func() {
+				u := firstReachable(urls)
+				if u == "" {
+					n.setStatus("Поиск главного ПК…", "Главный ПК «"+name+"» найден, но к нему нет подключения по сети (TCP 8420): проверьте брандмауэр на главном ПК.")
+					return
+				}
+				n.tryPair(stop, u, name)
+			}()
 		},
 		func(name string) {
 			if n.getLink() == nil {
