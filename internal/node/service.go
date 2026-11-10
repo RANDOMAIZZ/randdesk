@@ -199,6 +199,11 @@ func Install() {
 	if err := openFirewall(dst); err != nil {
 		log.Printf("брандмауэр: %v (разрешите RandDesk вручную, если другие ПК его не видят)", err)
 	}
+	if p, err := writeUninstaller(dst); err != nil {
+		log.Printf("файл удаления: %v", err)
+	} else {
+		fmt.Println("Удалить RandDesk полностью: " + p)
+	}
 	if err := s.Install(); err != nil {
 		ui.Fatalf("установка службы: %v", err)
 	}
@@ -225,11 +230,26 @@ func Install() {
 	ui.Pause()
 }
 
-// Uninstall удаляет службу, правило брандмауэра и файлы программы (данные остаются).
+// Uninstall полностью удаляет RandDesk установленным файлом удаления (спросит про ZeroTier);
+// если файла нет — удаляет только службу и правила брандмауэра.
 func Uninstall() {
 	if !ui.IsElevated() {
 		ui.Fatal("удаление требует прав администратора")
 	}
+	if p := uninstallerPath(); p != "" {
+		var cmd *exec.Cmd
+		if runtime.GOOS == "windows" {
+			cmd = exec.Command("cmd.exe", "/c", p)
+		} else {
+			cmd = exec.Command("sh", p)
+		}
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+		cmd.Dir = os.TempDir()
+		if err := cmd.Run(); err == nil {
+			return
+		}
+	}
+	removeUninstallEntry()
 	s, err := service.New(&program{}, svcConfig(""))
 	if err != nil {
 		ui.Fatal(err)
