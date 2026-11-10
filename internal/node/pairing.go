@@ -17,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"randdesk/internal/agent"
-	"randdesk/internal/pair"
+	"randsec/internal/agent"
+	"randsec/internal/pair"
 )
 
 // probeFingerprint подключается к хабу и узнаёт отпечаток его сертификата.

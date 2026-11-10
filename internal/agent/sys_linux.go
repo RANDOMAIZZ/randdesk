@@ -16,7 +16,7 @@ import (
 
 	"github.com/shirou/gopsutil/v4/process"
 
-	"randdesk/internal/proto"
+	"randsec/internal/proto"
 )
 
 func isElevated() bool { return os.Geteuid() == 0 }
@@ -74,7 +74,7 @@ func killProcess(pid uint32, tree bool) error {
 		return errors.New("системный процесс нельзя завершить")
 	}
 	if pid == uint32(os.Getpid()) {
-		return errors.New("нельзя завершить сам агент RandDesk")
+		return errors.New("нельзя завершить сам агент RANDSEC")
 	}
 	p, err := process.NewProcess(int32(pid))
 	if err != nil {
@@ -125,7 +125,7 @@ func listServices() ([]proto.Service, error) {
 
 func controlService(name, action string) error {
 	if strings.EqualFold(name, "randdesk") && action != "start" {
-		return errors.New("службу RandDesk нельзя остановить отсюда — связь с ПК пропадёт")
+		return errors.New("службу RANDSEC нельзя остановить отсюда — связь с ПК пропадёт")
 	}
 	switch action {
 	case "start", "stop", "restart":
@@ -147,9 +147,9 @@ func power(action string) error {
 	var args []string
 	switch action {
 	case "shutdown":
-		args = []string{"shutdown", "-h", "+0", "RandDesk: удалённое выключение"}
+		args = []string{"shutdown", "-h", "+0", "RANDSEC: удалённое выключение"}
 	case "reboot":
-		args = []string{"shutdown", "-r", "+0", "RandDesk: удалённая перезагрузка"}
+		args = []string{"shutdown", "-r", "+0", "RANDSEC: удалённая перезагрузка"}
 	case "cancel":
 		args = []string{"shutdown", "-c"}
 	case "sleep":

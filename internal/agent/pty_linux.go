@@ -12,7 +12,7 @@ import (
 	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
 
-	"randdesk/internal/proto"
+	"randsec/internal/proto"
 )
 
 // runTerminal — интерактивная оболочка (bash) в псевдотерминале.

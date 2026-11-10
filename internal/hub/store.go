@@ -18,7 +18,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"randdesk/internal/proto"
+	"randsec/internal/proto"
 )
 
 var dummyHash, _ = bcrypt.GenerateFromPassword([]byte("randdesk-dummy"), bcrypt.DefaultCost)
@@ -46,6 +46,7 @@ type Settings struct {
 	PublicHost string `json:"public_host"` // свой внешний адрес/домен (DDNS), host[:port]
 	Touched    bool   `json:"touched"`     // пользователь менял настройки вручную
 	ClipShared bool   `json:"clip_shared"` // единый буфер обмена между ПК
+	Indicator  string `json:"indicator"`   // плашка на управляемом ПК: top, top-left, …, off
 }
 
 type Device struct {

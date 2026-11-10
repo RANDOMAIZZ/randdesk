@@ -68,6 +68,12 @@ func (in *Input) Move(x, y int) {
 	in.c.Sync()
 }
 
+// MoveRel — относительное перемещение (игровой режим).
+func (in *Input) MoveRel(dx, dy int) {
+	xtest.FakeInput(in.c, motionNotify, 1, 0, in.root, int16(dx), int16(dy), 0) // detail 1 — относительно
+	in.c.Sync()
+}
+
 // Button: b — номер кнопки из браузера (0 левая, 1 средняя, 2 правая, 3/4 назад/вперёд).
 func (in *Input) Button(b int, down bool) {
 	xb := map[int]byte{0: 1, 1: 2, 2: 3, 3: 8, 4: 9}[b]

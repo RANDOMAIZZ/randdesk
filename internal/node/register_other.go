@@ -5,7 +5,7 @@ package node
 import (
 	"os"
 
-	"randdesk/internal/uninstall"
+	"randsec/internal/uninstall"
 )
 
 // writeUninstaller кладёт файл полного удаления рядом с программой: randdesk-uninstall.

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Полное удаление RandDesk с этого ПК (Linux).
+# Полное удаление RANDSEC с этого ПК (Linux).
 # Удаляет службу, программу, настройки и данные, правила брандмауэра и, по желанию, ZeroTier One.
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -8,14 +8,14 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 echo ""
-echo "  Удаление RandDesk с этого ПК"
-echo "  Будут удалены служба RandDesk, программа, все настройки (логин и пароль, список ПК,"
-echo "  разрешения, журнал) и правила брандмауэра RandDesk."
+echo "  Удаление RANDSEC с этого ПК"
+echo "  Будут удалены служба RANDSEC, программа, все настройки (логин и пароль, список ПК,"
+echo "  разрешения, журнал) и правила брандмауэра RANDSEC."
 echo ""
 printf "  Продолжить? [Д/н] "
 read ans
 case "$ans" in н|Н|n|N|нет|no) echo "  Отменено."; exit 0 ;; esac
-printf "  Удалить также ZeroTier One (RandDesk ставил его для связи через интернет)? [Д/н] "
+printf "  Удалить также ZeroTier One (RANDSEC ставил его для связи через интернет)? [Д/н] "
 read zt
 case "$zt" in н|Н|n|N|нет|no) removezt=0 ;; *) removezt=1 ;; esac
 
@@ -29,7 +29,7 @@ for unit in RandDesk randdesk; do
     rm -f "/etc/systemd/system/$unit.service" "/lib/systemd/system/$unit.service"
 done
 systemctl daemon-reload 2>/dev/null
-pkill -x randdesk 2>/dev/null
+pkill -x randdesk 2>/dev/null; pkill -x randsec 2>/dev/null
 
 # 2. Брандмауэр
 if command -v ufw >/dev/null 2>&1; then
@@ -40,7 +40,7 @@ if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>
     firewall-cmd --permanent --remove-port=8420/tcp --remove-port=8421/udp >/dev/null 2>&1
     firewall-cmd --reload >/dev/null 2>&1
 fi
-echo "  правила брандмауэра RandDesk удалены"
+echo "  правила брандмауэра RANDSEC удалены"
 
 # 3. ZeroTier One
 hasZT=0
@@ -66,4 +66,4 @@ echo "  удалены /usr/local/bin/randdesk и /var/lib/randdesk"
 rm -f /usr/local/bin/randdesk-uninstall
 
 echo ""
-echo "  RandDesk удалён с этого ПК."
+echo "  RANDSEC удалён с этого ПК."

@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"randdesk/internal/rendezvous"
-	"randdesk/internal/ui"
-	"randdesk/internal/zt"
+	"randsec/internal/rendezvous"
+	"randsec/internal/ui"
+	"randsec/internal/zt"
 )
 
 // Сеть через интернет на ZeroTier — полностью бесплатно и без аккаунта: сетью управляет
@@ -78,7 +78,7 @@ func (z *ztManager) wait(stop <-chan struct{}, d time.Duration) bool {
 // local ставит ZeroTier при необходимости и возвращает клиент службы и ID этого узла.
 func (z *ztManager) local(ctx context.Context) (*zt.Local, string, error) {
 	if !ui.IsElevated() {
-		return nil, "", fmt.Errorf("RandDesk запущен без прав администратора и не может поставить ZeroTier — установите RandDesk службой (двойной щелчок по randdesk.exe → «Да»)")
+		return nil, "", fmt.Errorf("RANDSEC запущен без прав администратора и не может поставить ZeroTier — установите RANDSEC службой (двойной щелчок по randsec.exe → «Да»)")
 	}
 	if !zt.Installed() {
 		z.set(func(s *ZTStatus) { s.Step = "Установка ZeroTier…" })
@@ -164,7 +164,7 @@ func (z *ztManager) adminStep(ctx context.Context, cfg Config, lastPublish *time
 			z.set(func(s *ZTStatus) { s.Step = "Создание сети…" })
 			b := make([]byte, 1)
 			rand.Read(b)
-			if nwid, err = l.CreateNetwork(ctx, node, "RandDesk "+cfg.Account.Login, 10+b[0]%200); err != nil {
+			if nwid, err = l.CreateNetwork(ctx, node, "RANDSEC "+cfg.Account.Login, 10+b[0]%200); err != nil {
 				return fmt.Errorf("создание сети: %w", err)
 			}
 			log.Printf("ZeroTier: создана сеть %s", nwid)

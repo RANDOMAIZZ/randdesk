@@ -11,7 +11,7 @@ import (
 
 	"rsc.io/qr"
 
-	"randdesk/internal/proto"
+	"randsec/internal/proto"
 )
 
 // loginTicket — пароль проверен, ждём второй фактор.

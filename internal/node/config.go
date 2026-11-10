@@ -1,4 +1,4 @@
-// Package node — RandDesk «одной кнопкой»: служба на каждом ПК.
+// Package node — RANDSEC «одной кнопкой»: служба на каждом ПК.
 //
 // Главный (админский) ПК держит панель администратора (хаб). Обычные ПК, настроенные тем же
 // логином и паролем, сами находят главный ПК в сети, подключаются к нему и показывают
@@ -14,8 +14,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	"randdesk/internal/agent"
-	"randdesk/internal/pair"
+	"randsec/internal/agent"
+	"randsec/internal/pair"
 )
 
 const (

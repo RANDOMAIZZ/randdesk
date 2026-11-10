@@ -13,7 +13,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"randdesk/internal/proto"
+	"randsec/internal/proto"
 )
 
 var (
@@ -154,7 +154,7 @@ func killProcess(pid uint32, tree bool) error {
 		return errors.New("системный процесс нельзя завершить")
 	}
 	if pid == uint32(os.Getpid()) {
-		return errors.New("нельзя завершить сам агент RandDesk")
+		return errors.New("нельзя завершить сам агент RANDSEC")
 	}
 	targets := []uint32{pid}
 	if tree {

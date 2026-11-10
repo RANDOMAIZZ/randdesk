@@ -16,7 +16,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"randdesk/internal/proto"
+	"randsec/internal/proto"
 )
 
 const maxOutput = 2 << 20
@@ -70,7 +70,7 @@ func runExec(r proto.ExecReq) proto.ExecResp {
 		// Команда пишется во временный .cmd: chcp в отдельной строке действует на
 		// последующие строки (в одной строке cmd уже разобрал текст в старой кодировке),
 		// и так же поддерживаются многострочные команды.
-		f, err := os.CreateTemp("", "randdesk-*.cmd")
+		f, err := os.CreateTemp("", "randsec-*.cmd")
 		if err != nil {
 			return proto.ExecResp{Output: "не удалось создать временный файл: " + err.Error(), ExitCode: -1}
 		}

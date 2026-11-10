@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"randdesk/internal/pair"
+	"randsec/internal/pair"
 )
 
 // hAgentPair — привязка ПК по общему логину и паролю (режим узла), без ключа привязки.

@@ -17,9 +17,9 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"randdesk/internal/proto"
-	"randdesk/internal/wol"
-	"randdesk/web"
+	"randsec/internal/proto"
+	"randsec/internal/wol"
+	"randsec/web"
 )
 
 const (
@@ -116,6 +116,8 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("GET /api/devices/{id}", s.authDev(s.hDevice, true))
 	m.HandleFunc("GET /api/devices/{id}/history", s.authDev(s.hHistory, true))
 	m.HandleFunc("GET /api/access", s.auth(s.hAccess))
+	m.HandleFunc("GET /api/indicator", s.auth(s.hIndicator))
+	m.HandleFunc("POST /api/indicator", s.auth(s.hIndicatorSet))
 	m.HandleFunc("POST /api/access", s.auth(s.hAccessSet))
 	m.HandleFunc("POST /api/devices/{id}/input", s.auth(s.hInput))
 	m.HandleFunc("POST /api/devices/{id}/clipboard", s.auth(s.hClipboard))
@@ -631,7 +633,7 @@ func (s *Server) hDesktop(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusConflict, "устройство не в сети")
 		return
 	}
-	s.relayStream(w, r, ac, proto.StreamOpen{Kind: "desktop"}, "desktop")
+	s.relayStream(w, r, ac, proto.StreamOpen{Kind: "desktop", Indicator: s.store.Settings().Indicator}, "desktop")
 }
 
 // relayStream просит агента открыть поток и прозрачно соединяет его с браузером.

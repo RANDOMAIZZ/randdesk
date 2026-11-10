@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"randdesk/internal/pair"
+	"randsec/internal/pair"
 )
 
 func TestSealOpen(t *testing.T) {

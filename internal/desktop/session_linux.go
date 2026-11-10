@@ -17,7 +17,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kbinani/screenshot"
 
-	"randdesk/internal/x11"
+	"randsec/internal/x11"
 )
 
 const maxInflight = 2
@@ -37,6 +37,7 @@ type clientMsg struct {
 	FPS   int     `json:"fps"`
 	Mon   *int    `json:"mon"`
 	Scale int     `json:"scale"`
+	R     bool    `json:"r"` // игровой режим: кнопки без перемещения курсора в точку
 }
 
 type monitor struct {
@@ -85,6 +86,12 @@ type lsession struct {
 
 // ShowIndicator — на Linux плашка не показывается (нет общего способа вывести поверх всех окон).
 func ShowIndicator(string) func() { return func() {} }
+
+// ShowNotice — см. ShowIndicator.
+func ShowNotice(string) func() { return func() {} }
+
+// SetIndicatorPos — на Linux плашки нет, настройка не используется.
+func SetIndicatorPos(string) {}
 
 // Serve обслуживает один сеанс удалённого рабочего стола до закрытия соединения.
 func Serve(ws *websocket.Conn) error {
@@ -195,9 +202,13 @@ func (s *lsession) readLoop() {
 			if x, y, ok := s.toScreen(m.X, m.Y); ok {
 				s.in.Move(x, y)
 			}
+		case "mr":
+			s.in.MoveRel(max(-4000, min(4000, m.DX)), max(-4000, min(4000, m.DY)))
 		case "md", "mu":
-			if x, y, ok := s.toScreen(m.X, m.Y); ok {
-				s.in.Move(x, y)
+			if !m.R {
+				if x, y, ok := s.toScreen(m.X, m.Y); ok {
+					s.in.Move(x, y)
+				}
 			}
 			s.in.Button(m.B, m.T == "md")
 		case "wh":

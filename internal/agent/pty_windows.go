@@ -12,7 +12,7 @@ import (
 	"github.com/gorilla/websocket"
 	"golang.org/x/sys/windows"
 
-	"randdesk/internal/proto"
+	"randsec/internal/proto"
 )
 
 // pty — процесс, запущенный в псевдоконсоли Windows (ConPTY).

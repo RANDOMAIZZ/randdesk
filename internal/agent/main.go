@@ -18,8 +18,9 @@ import (
 
 	"github.com/kardianos/service"
 
-	"randdesk/internal/proto"
-	"randdesk/internal/ui"
+	"randsec/internal/desktop"
+	"randsec/internal/proto"
+	"randsec/internal/ui"
 )
 
 type Config struct {
@@ -59,6 +60,7 @@ func Main(args []string) {
 	fpFlag := fs.String("fp", "", "отпечаток сертификата хаба (из веб-интерфейса) — защита от подмены хаба")
 	cfgPath := fs.String("config", defaultConfigPath(), "файл конфигурации агента")
 	sessionID := fs.String("session", "", "служебный параметр помощника рабочего стола")
+	indicator := fs.String("indicator", "top", "служебный параметр: положение плашки на экране")
 	fs.Parse(args)
 	if abs, err := filepath.Abs(*cfgPath); err == nil {
 		*cfgPath = abs
@@ -85,6 +87,7 @@ func Main(args []string) {
 			}
 			cfg.Hubs = hubs
 		}
+		desktop.SetIndicatorPos(*indicator)
 		runDesktopHelper(cfg, *sessionID)
 		return
 	case "session-helper":
@@ -270,7 +273,7 @@ func enroll(hubURL, key, fp string) (*proto.EnrollResp, error) {
 }
 
 func runConsole(cfg *Config) {
-	log.Printf("RandDesk agent %s, хаб %s. Ctrl+C — выход.", proto.Version, strings.Join(cfg.hubList(), ", "))
+	log.Printf("RANDSEC agent %s, хаб %s. Ctrl+C — выход.", proto.Version, strings.Join(cfg.hubList(), ", "))
 	stop := make(chan struct{})
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)
@@ -307,8 +310,8 @@ func (p *program) Stop(service.Service) error {
 func serviceConfig(cfgPath, exe string) *service.Config {
 	return &service.Config{
 		Name:        "RandDeskAgent",
-		DisplayName: "RandDesk Agent",
-		Description: "Агент удалённого управления RandDesk",
+		DisplayName: "RANDSEC Agent",
+		Description: "Агент удалённого управления RANDSEC",
 		Executable:  exe,
 		Arguments:   []string{"agent", "run", "-config", cfgPath},
 		Option: service.KeyValue{
@@ -331,7 +334,7 @@ func runService(cfg *Config, cfgPath string) {
 		return
 	}
 	setupServiceLog()
-	log.Printf("служба RandDesk agent %s запущена, хаб %s", proto.Version, strings.Join(cfg.hubList(), ", "))
+	log.Printf("служба RANDSEC agent %s запущена, хаб %s", proto.Version, strings.Join(cfg.hubList(), ", "))
 	if err := s.Run(); err != nil {
 		ui.Fatal(err)
 	}
@@ -376,7 +379,7 @@ func installService(cfg *Config, cfgPath string) {
 	if err := s.Start(); err != nil {
 		ui.Fatalf("запуск службы: %v", err)
 	}
-	log.Printf("служба RandDeskAgent установлена и запущена (%s)", dst)
+	log.Printf("служба RANDSECAgent установлена и запущена (%s)", dst)
 	ui.Pause()
 }
 
@@ -389,7 +392,7 @@ func uninstallService() {
 	if err := s.Uninstall(); err != nil {
 		ui.Fatalf("удаление службы: %v", err)
 	}
-	log.Print("служба RandDeskAgent удалена")
+	log.Print("служба RANDSECAgent удалена")
 	ui.Pause()
 }
 

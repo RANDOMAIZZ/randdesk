@@ -60,8 +60,8 @@ func checkTOTP(secretB32, code string, last int64, now time.Time) (int64, bool) 
 }
 
 func totpURI(user, secret string) string {
-	label := url.PathEscape("RandDesk:" + user)
-	return "otpauth://totp/" + label + "?secret=" + secret + "&issuer=RandDesk&algorithm=SHA1&digits=6&period=30"
+	label := url.PathEscape("RANDSEC:" + user)
+	return "otpauth://totp/" + label + "?secret=" + secret + "&issuer=RANDSEC&algorithm=SHA1&digits=6&period=30"
 }
 
 // ---------- резервные коды ----------

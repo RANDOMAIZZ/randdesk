@@ -10,7 +10,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"randdesk/internal/proto"
+	"randsec/internal/proto"
 )
 
 // ---------- кто делает запрос: администратор или ПК с разрешением ----------
@@ -156,6 +156,35 @@ func (s *Server) hClipboard(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, proto.OK{OK: true})
 }
 
+// ---------- плашка на управляемом ПК ----------
+
+var indicatorPositions = map[string]bool{"top": true, "top-left": true, "top-right": true, "bottom": true, "bottom-left": true, "bottom-right": true, "off": true}
+
+func (s *Server) hIndicator(w http.ResponseWriter, r *http.Request) {
+	pos := s.store.Settings().Indicator
+	if pos == "" {
+		pos = "top"
+	}
+	writeJSON(w, 200, map[string]string{"pos": pos})
+}
+
+func (s *Server) hIndicatorSet(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Pos string }
+	if err := readJSON(r, &req); err != nil || !indicatorPositions[req.Pos] {
+		jsonErr(w, 400, "неверное положение")
+		return
+	}
+	st := s.store.Settings()
+	st.Indicator = req.Pos
+	if err := s.store.SetSettings(st); err != nil {
+		jsonErr(w, 500, err.Error())
+		return
+	}
+	s.audit.Log(userOf(r), clientIP(r), "", "indicator", req.Pos)
+	s.pushSessionState("")
+	writeJSON(w, 200, proto.OK{OK: true})
+}
+
 // ---------- интернет-сеть ZeroTier ----------
 
 func (s *Server) hZeroTier(w http.ResponseWriter, r *http.Request) {
@@ -214,6 +243,7 @@ func (s *Server) sessionState(d Device) proto.SessionState {
 		Keyboard:  d.Lock.Keyboard,
 		Mouse:     d.Lock.Mouse,
 		Clipboard: s.store.Settings().ClipShared && !d.NoClip,
+		Indicator: s.store.Settings().Indicator,
 	}
 }
 

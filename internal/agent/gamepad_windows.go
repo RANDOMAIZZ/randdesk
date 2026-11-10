@@ -12,7 +12,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"randdesk/internal/session"
+	"randsec/internal/session"
 )
 
 // Геймпады отключаются как устройства в диспетчере устройств: Xbox-контроллеры

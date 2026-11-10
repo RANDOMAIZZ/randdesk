@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"randdesk/internal/pair"
+	"randsec/internal/pair"
 )
 
 // RANDDESK_NTFY_TEST=1 go test ./internal/rendezvous -run Live -v

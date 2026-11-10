@@ -13,7 +13,7 @@ import (
 	gnet "github.com/shirou/gopsutil/v4/net"
 	"github.com/shirou/gopsutil/v4/process"
 
-	"randdesk/internal/proto"
+	"randsec/internal/proto"
 )
 
 type statsCollector struct {

@@ -13,9 +13,9 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"randdesk/internal/evdev"
-	"randdesk/internal/proto"
-	"randdesk/internal/x11"
+	"randsec/internal/evdev"
+	"randsec/internal/proto"
+	"randsec/internal/x11"
 )
 
 const maxClipRunes = 1 << 20

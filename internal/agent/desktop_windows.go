@@ -17,7 +17,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"randdesk/internal/desktop"
+	"randsec/internal/desktop"
 )
 
 // runDesktopHelper — отдельный процесс в сеансе пользователя: подключается к хабу
@@ -86,8 +86,8 @@ func activeSessionID() (uint32, error) {
 	return 0, errors.New("нет активного сеанса пользователя")
 }
 
-func startDesktopHelper(cfgPath, session, hub string) error {
-	_, err := startHelper([]string{"agent", "desktop-helper", "-config", cfgPath, "-session", session, "-hub", hub})
+func startDesktopHelper(cfgPath, session, hub, indicator string) error {
+	_, err := startHelper([]string{"agent", "desktop-helper", "-config", cfgPath, "-session", session, "-hub", hub, "-indicator", indicator})
 	return err
 }
 

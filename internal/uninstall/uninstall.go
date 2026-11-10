@@ -1,4 +1,4 @@
-// Package uninstall — файлы полного удаления RandDesk, которые установщик кладёт рядом с программой.
+// Package uninstall — файлы полного удаления RANDSEC, которые установщик кладёт рядом с программой.
 package uninstall
 
 import (
@@ -6,15 +6,15 @@ import (
 	"strings"
 )
 
-//go:embed uninstall-randdesk.cmd
+//go:embed uninstall-randsec.cmd
 var windowsScript string
 
-//go:embed uninstall-randdesk.sh
+//go:embed uninstall-randsec.sh
 var linuxScript string
 
 // WindowsName и LinuxName — имена файлов удаления.
 const (
-	WindowsName = "uninstall-randdesk.cmd"
+	WindowsName = "uninstall-randsec.cmd"
 	LinuxPath   = "/usr/local/bin/randdesk-uninstall"
 )
 

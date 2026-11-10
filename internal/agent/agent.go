@@ -15,8 +15,8 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"randdesk/internal/proto"
-	"randdesk/internal/wol"
+	"randsec/internal/proto"
+	"randsec/internal/wol"
 )
 
 var errUnauthorized = errors.New("хаб отклонил устройство (удалено или ключ устарел) — привяжите ПК заново")
@@ -544,7 +544,7 @@ func (a *Agent) handleStream(so proto.StreamOpen) {
 	if so.Kind == "desktop" {
 		// рабочий стол обслуживает отдельный процесс в сеансе пользователя
 		log.Printf("запрос удалённого рабочего стола")
-		if err := startDesktopHelper(a.cfg.path, so.Session, a.current()); err != nil {
+		if err := startDesktopHelper(a.cfg.path, so.Session, a.current(), so.Indicator); err != nil {
 			log.Printf("рабочий стол: %v", err)
 			if ws, derr := a.dial("/api/agent/stream?session=" + so.Session); derr == nil {
 				b, _ := json.Marshal(proto.TermControl{Type: "error", Message: "не удалось запустить захват экрана: " + err.Error()})

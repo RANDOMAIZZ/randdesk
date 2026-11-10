@@ -44,7 +44,7 @@ func download(ctx context.Context, url, name string) (string, error) {
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("загрузка %s: %s", url, resp.Status)
 	}
-	dir, err := os.MkdirTemp("", "randdesk-zt-")
+	dir, err := os.MkdirTemp("", "randsec-zt-")
 	if err != nil {
 		return "", err
 	}

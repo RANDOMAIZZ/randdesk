@@ -3,8 +3,10 @@
 package desktop
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"image"
 	"log"
 	"runtime"
@@ -36,10 +38,13 @@ type clientMsg struct {
 	FPS   int     `json:"fps"`
 	Mon   *int    `json:"mon"`
 	Scale int     `json:"scale"`
+	R     bool    `json:"r"` // игровой режим: кнопки без перемещения курсора в точку
+	Codec string  `json:"codec"`
 }
 
 type config struct {
 	quality, fps, mon, scale int
+	codec                    string // "h264" — браузер умеет декодировать видео, иначе JPEG
 }
 
 type geometry struct {
@@ -60,6 +65,7 @@ type session struct {
 	ackSig    chan struct{}
 	inflight  atomic.Int32
 	forceFull atomic.Bool
+	h264Fails int // сбои аппаратного кодировщика в этом сеансе; после нескольких — JPEG
 
 	input chan clientMsg
 
@@ -78,7 +84,7 @@ func Serve(ws *websocket.Conn) error {
 		ackSig:   make(chan struct{}, 1),
 		input:    make(chan clientMsg, 1024),
 	}
-	stopIndicator := showIndicator("RandDesk · этим ПК управляют удалённо")
+	stopIndicator := showIndicator("Удалённое управление · RANDSEC", false)
 	defer stopIndicator()
 	go s.readLoop()
 	go s.inputLoop()
@@ -147,7 +153,7 @@ func (s *session) readLoop() {
 			}
 		case "ping":
 			s.sendJSON(map[string]any{"type": "pong", "ts": m.TS})
-		case "full":
+		case "full", "key":
 			s.forceFull.Store(true)
 		case "cfg":
 			s.cfgMu.Lock()
@@ -164,7 +170,11 @@ func (s *session) readLoop() {
 			if m.Mon != nil {
 				s.cfg.mon = *m.Mon
 			}
-			changed := old.mon != s.cfg.mon || old.scale != s.cfg.scale
+			if m.Codec == "h264" || m.Codec == "jpeg" {
+				s.cfg.codec = m.Codec
+			}
+			changed := old.mon != s.cfg.mon || old.scale != s.cfg.scale || old.codec != s.cfg.codec ||
+				(s.cfg.codec == "h264" && (old.quality != s.cfg.quality || old.fps != s.cfg.fps)) // видео: новый поток
 			s.cfgMu.Unlock()
 			if changed {
 				select {
@@ -224,7 +234,26 @@ func (s *session) captureLoop() error {
 			continue
 		}
 		s.sendJSON(map[string]any{"type": "info", "monitors": mons, "monitor": mi, "capture": c.kind(), "desktop": desk.name})
-		err = s.stream(c, cfg, &desk)
+		if cfg.codec == "h264" && s.h264Fails < 3 {
+			err = s.streamH264(c, cfg, &desk)
+			if err != nil && !errors.Is(err, errReconfig) {
+				s.h264Fails++
+				if errors.Is(err, errNoH264) {
+					s.h264Fails = 3
+				}
+				log.Printf("видео H.264: %v", err)
+				if s.h264Fails >= 3 {
+					s.sendJSON(map[string]any{"type": "codec", "codec": "jpeg", "reason": err.Error()})
+				}
+				c.close()
+				continue
+			}
+		} else {
+			if cfg.codec == "h264" {
+				s.sendJSON(map[string]any{"type": "codec", "codec": "jpeg"})
+			}
+			err = s.stream(c, cfg, &desk)
+		}
 		c.close()
 		switch {
 		case err == nil, errors.Is(err, errReconfig):
@@ -369,6 +398,140 @@ func (s *session) stream(c capturer, cfg config, desk *deskSwitcher) error {
 	}
 }
 
+var errNoH264 = errors.New("аппаратный H.264 недоступен")
+
+// streamH264 — поток видео H.264 с аппаратным сжатием: кадр целиком на видеокарте, поэтому
+// процессор занят только копированием и переводом цвета — 60 кадров/с даже на 1440p.
+func (s *session) streamH264(c capturer, cfg config, desk *deskSwitcher) error {
+	b := c.bounds()
+	w, h := b.Dx(), b.Dy()
+	if cfg.scale == 50 {
+		w, h = w/2, h/2
+	}
+	w, h = w&^1, h&^1
+	// кадр переводится в NV12 сразу при захвате (из памяти DXGI, без промежуточной копии)
+	nv12 := make([]byte, w*h*3/2)
+	raw, _ := c.(rawCapturer)
+	var full *image.RGBA
+	if raw == nil {
+		full = image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+	}
+	grab := func(timeout uint) (bool, error) {
+		if raw != nil {
+			return raw.nextRaw(timeout, func(pix []byte, stride int, bgr bool) { toNV12(nv12, pix, stride, b.Dx(), bgr, w, h) })
+		}
+		got, err := c.next(full, timeout)
+		if got {
+			rgbaToNV12(nv12, full, w, h)
+		}
+		return got, err
+	}
+	enc, err := newH264(w, h, cfg.fps, h264Bitrate(cfg.quality, w, h, cfg.fps))
+	if err != nil {
+		return fmt.Errorf("%w: %v", errNoH264, err)
+	}
+	defer enc.close()
+	s.geomMu.Lock()
+	s.geom = geometry{b: b, w: w, h: h}
+	s.geomMu.Unlock()
+	s.sendJSON(map[string]any{"type": "codec", "codec": "h264", "encoder": enc.name})
+	s.forceFull.Store(false)
+
+	sendErr := make(chan error, 1)
+	go func() {
+		var id uint32
+		for f := range enc.out {
+			id++
+			msg := make([]byte, 10, 10+len(f.data))
+			msg[0] = 2
+			binary.LittleEndian.PutUint32(msg[1:], id)
+			binary.LittleEndian.PutUint16(msg[5:], uint16(w))
+			binary.LittleEndian.PutUint16(msg[7:], uint16(h))
+			if f.key {
+				msg[9] = 1
+			}
+			s.inflight.Add(1)
+			if err := s.sendBinary(append(msg, f.data...)); err != nil {
+				select {
+				case sendErr <- err:
+				default:
+				}
+			}
+		}
+	}()
+
+	var (
+		pending    = true
+		key        = true
+		refine     = 0
+		lastSend   time.Time
+		lastChange = time.Now()
+		lastCheck  = time.Now()
+	)
+	for {
+		select {
+		case <-s.done:
+			return nil
+		case <-s.reconfig:
+			return errReconfig
+		case <-sendErr:
+			s.stop()
+			return nil
+		default:
+		}
+		if time.Since(lastCheck) > time.Second {
+			lastCheck = time.Now()
+			if changed, _ := desk.sync(); changed {
+				return errors.New("смена рабочего стола: " + desk.name)
+			}
+		}
+		timeout := uint(50)
+		if pending {
+			timeout = 0
+		}
+		got, err := grab(timeout)
+		if err != nil {
+			return err
+		}
+		if got {
+			pending, refine, lastChange = true, 0, time.Now()
+		}
+		if s.forceFull.Swap(false) { // браузер просит ключевой кадр (новый декодер, ошибка)
+			pending, key = true, true
+		}
+		if !pending {
+			// картинка замерла: пара повторов того же кадра — кодировщик дочищает качество,
+			// а последний кадр гарантированно выходит из конвейера
+			if refine < 2 && time.Since(lastChange) > 150*time.Millisecond && time.Since(lastSend) > 150*time.Millisecond {
+				refine++
+				pending = true
+			} else {
+				continue
+			}
+		}
+		if s.inflight.Load() >= maxInflight {
+			select {
+			case <-s.ackSig:
+			case <-s.done:
+				return nil
+			case <-time.After(2 * time.Second):
+				s.inflight.Store(0)
+			}
+			continue
+		}
+		if wait := time.Second/time.Duration(cfg.fps) - time.Since(lastSend); wait > 0 {
+			time.Sleep(min(wait, 4*time.Millisecond))
+			continue
+		}
+		pending = false
+		if err := enc.encode(func(dst []byte) { copy(dst, nv12) }, key); err != nil {
+			return err
+		}
+		key = false
+		lastSend = time.Now()
+	}
+}
+
 // ---------- ввод ----------
 
 func (s *session) toScreen(x, y int) (int, int, bool) {
@@ -419,6 +582,10 @@ func (s *session) inputLoop() {
 			if x, y, ok := s.toScreen(m.X, m.Y); ok {
 				sendMouse(absMove(x, y))
 			}
+		case "mr":
+			// игровой режим: относительное движение, как от настоящей мыши — его видят игры,
+			// которые прячут курсор и читают «сырой» ввод (шутеры и т. п.)
+			sendMouse(mouseInput{Type: inputMouse, Dx: int32(max(-4000, min(4000, m.DX))), Dy: int32(max(-4000, min(4000, m.DY))), Flags: mouseMove})
 		case "md", "mu":
 			down := m.T == "md"
 			f, d := buttonFlags(m.B, down)
@@ -426,7 +593,9 @@ func (s *session) inputLoop() {
 				continue
 			}
 			btn := mouseInput{Type: inputMouse, Flags: f, MouseData: d}
-			if x, y, ok := s.toScreen(m.X, m.Y); ok {
+			if m.R {
+				sendMouse(btn)
+			} else if x, y, ok := s.toScreen(m.X, m.Y); ok {
 				sendMouse(absMove(x, y), btn)
 			} else {
 				sendMouse(btn)

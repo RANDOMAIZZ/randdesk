@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"reflect"
 	"time"
+	"unsafe"
 
 	"github.com/kbinani/screenshot"
 	"github.com/kirides/go-d3d/d3d11"
@@ -50,6 +52,7 @@ type dxgiCap struct {
 	ctx *d3d11.ID3D11DeviceContext
 	dup *outputduplication.OutputDuplicator
 	b   image.Rectangle
+	bgr bool // старый способ дублирования (DuplicateOutput) отдаёт BGRA
 }
 
 func newDXGI(target image.Rectangle) (*dxgiCap, error) {
@@ -66,7 +69,9 @@ func newDXGI(target image.Rectangle) (*dxgiCap, error) {
 		}
 		b, err := dup.GetBounds()
 		if err == nil && b == target {
-			return &dxgiCap{dev: dev, ctx: ctx, dup: dup, b: b}, nil
+			// библиотека не сообщает формат наружу — читаем её внутренний признак
+			bgr := reflect.ValueOf(dup).Elem().FieldByName("needsSwizzle").Bool()
+			return &dxgiCap{dev: dev, ctx: ctx, dup: dup, b: b, bgr: bgr}, nil
 		}
 		dup.Release()
 	}
@@ -81,6 +86,24 @@ func (c *dxgiCap) next(img *image.RGBA, timeoutMs uint) (bool, error) {
 		return false, nil
 	}
 	return err == nil, err
+}
+
+// rawCapturer отдаёт кадр прямо из памяти захвата, без копирования в image.RGBA.
+type rawCapturer interface {
+	nextRaw(timeoutMs uint, use func(pix []byte, stride int, bgr bool)) (bool, error)
+}
+
+func (c *dxgiCap) nextRaw(timeoutMs uint, use func(pix []byte, stride int, bgr bool)) (bool, error) {
+	unmap, mr, size, err := c.dup.Snapshot(timeoutMs)
+	if errors.Is(err, outputduplication.ErrNoImageYet) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	defer unmap()
+	use(unsafe.Slice((*byte)(mr.PBits), int(mr.Pitch)*int(size.Y)), int(mr.Pitch), c.bgr)
+	return true, nil
 }
 
 func (c *dxgiCap) bounds() image.Rectangle { return c.b }

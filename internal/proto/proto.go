@@ -3,7 +3,7 @@ package proto
 
 import "encoding/json"
 
-const Version = "0.4.3"
+const Version = "0.5.0"
 
 // Типы сообщений в управляющем WebSocket-канале агента.
 const (
@@ -115,11 +115,12 @@ type WolReq struct {
 }
 
 type StreamOpen struct {
-	Session string `json:"session"`
-	Kind    string `json:"kind"` // terminal
-	Shell   string `json:"shell"`
-	Cols    int    `json:"cols"`
-	Rows    int    `json:"rows"`
+	Session   string `json:"session"`
+	Kind      string `json:"kind"`                // terminal
+	Indicator string `json:"indicator,omitempty"` // где показывать плашку «идёт управление» (off — не показывать)
+	Shell     string `json:"shell"`
+	Cols      int    `json:"cols"`
+	Rows      int    `json:"rows"`
 }
 
 // TermControl — текстовые управляющие сообщения в потоке терминала.
@@ -145,6 +146,7 @@ type SessionState struct {
 	Keyboard  bool   `json:"keyboard"`
 	Mouse     bool   `json:"mouse"`
 	Clipboard bool   `json:"clipboard"`
+	Indicator string `json:"indicator,omitempty"` // положение плашек на экране ПК
 }
 
 // SessionMsg — сообщения помощника сеанса (буфер обмена).

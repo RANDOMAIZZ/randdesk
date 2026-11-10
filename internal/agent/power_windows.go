@@ -47,9 +47,9 @@ func enablePrivilege(name string) error {
 func power(action string) error {
 	switch action {
 	case "shutdown":
-		return runHidden("shutdown.exe", "/s", "/t", "5", "/c", "RandDesk: удалённое выключение")
+		return runHidden("shutdown.exe", "/s", "/t", "5", "/c", "RANDSEC: удалённое выключение")
 	case "reboot":
-		return runHidden("shutdown.exe", "/r", "/t", "5", "/c", "RandDesk: удалённая перезагрузка")
+		return runHidden("shutdown.exe", "/r", "/t", "5", "/c", "RANDSEC: удалённая перезагрузка")
 	case "cancel":
 		return runHidden("shutdown.exe", "/a")
 	case "sleep", "hibernate":

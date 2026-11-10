@@ -39,7 +39,7 @@ func loadOrCreateCert(dataDir string) (tls.Certificate, error) {
 	host, _ := os.Hostname()
 	tmpl := &x509.Certificate{
 		SerialNumber:          new(big.Int).SetBytes(randBytes(16)),
-		Subject:               pkix.Name{CommonName: "RandDesk Hub " + host},
+		Subject:               pkix.Name{CommonName: "RANDSEC Hub " + host},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().AddDate(20, 0, 0),
 		KeyUsage:              x509.KeyUsageDigitalSignature,

@@ -1,4 +1,4 @@
-module randdesk
+module randsec
 
 go 1.27.3
 

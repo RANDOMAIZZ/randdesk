@@ -17,8 +17,8 @@ import (
 
 	"github.com/kardianos/service"
 
-	"randdesk/internal/proto"
-	"randdesk/internal/ui"
+	"randsec/internal/proto"
+	"randsec/internal/ui"
 )
 
 const serviceName = "RandDesk"
@@ -52,7 +52,7 @@ func (p *program) Start(service.Service) error {
 	go func() {
 		defer close(p.done)
 		if err := Run(p.o, p.stop); err != nil {
-			log.Printf("RandDesk: %v", err)
+			log.Printf("RANDSEC: %v", err)
 		}
 	}()
 	return nil
@@ -70,8 +70,8 @@ func (p *program) Stop(service.Service) error {
 func svcConfig(exe string) *service.Config {
 	return &service.Config{
 		Name:        serviceName,
-		DisplayName: "RandDesk",
-		Description: "RandDesk — удалённое управление своими ПК",
+		DisplayName: "RANDSEC",
+		Description: "RANDSEC — удалённое управление своими ПК",
 		Executable:  exe,
 		Arguments:   []string{"node", "run"},
 		Option: service.KeyValue{
@@ -83,7 +83,7 @@ func svcConfig(exe string) *service.Config {
 	}
 }
 
-// Installed — установлена ли служба RandDesk на этом ПК.
+// Installed — установлена ли служба RANDSEC на этом ПК.
 func Installed() bool {
 	s, err := service.New(&program{}, svcConfig(""))
 	if err != nil {
@@ -93,7 +93,7 @@ func Installed() bool {
 	return err == nil && st != service.StatusUnknown
 }
 
-// Main — команда «randdesk node …».
+// Main — команда «randsec node …».
 func Main(args []string) {
 	sub := "run"
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
@@ -117,7 +117,7 @@ func Main(args []string) {
 			return
 		}
 		setupLog(o.Dir)
-		log.Printf("служба RandDesk %s запущена", proto.Version)
+		log.Printf("служба RANDSEC %s запущена", proto.Version)
 		if err := s.Run(); err != nil {
 			log.Fatal(err)
 		}
@@ -164,11 +164,11 @@ func hidden(name string, args ...string) error {
 func Install() {
 	if !ui.IsElevated() {
 		if runtime.GOOS != "windows" {
-			ui.Fatal("установка требует прав root: sudo ./randdesk install")
+			ui.Fatal("установка требует прав root: sudo ./randsec install")
 		}
 		ui.Fatal("установка требует прав администратора")
 	}
-	fmt.Println("Установка RandDesk…")
+	fmt.Println("Установка RANDSEC…")
 	dst := installedExe()
 	s, err := service.New(&program{}, svcConfig(dst))
 	if err != nil {
@@ -197,12 +197,12 @@ func Install() {
 		os.Chmod(dst, 0o755)
 	}
 	if err := openFirewall(dst); err != nil {
-		log.Printf("брандмауэр: %v (разрешите RandDesk вручную, если другие ПК его не видят)", err)
+		log.Printf("брандмауэр: %v (разрешите RANDSEC вручную, если другие ПК его не видят)", err)
 	}
 	if p, err := writeUninstaller(dst); err != nil {
 		log.Printf("файл удаления: %v", err)
 	} else {
-		fmt.Println("Удалить RandDesk полностью: " + p)
+		fmt.Println("Удалить RANDSEC полностью: " + p)
 	}
 	if err := s.Install(); err != nil {
 		ui.Fatalf("установка службы: %v", err)
@@ -210,7 +210,7 @@ func Install() {
 	if err := s.Start(); err != nil {
 		ui.Fatalf("запуск службы: %v", err)
 	}
-	fmt.Println("Служба RandDesk установлена и запущена.")
+	fmt.Println("Служба RANDSEC установлена и запущена.")
 	url := "http://localhost:8420"
 	for range 40 { // ждём, пока страница начнёт отвечать
 		if r, err := http.Get(url + "/api/state"); err == nil {
@@ -230,7 +230,7 @@ func Install() {
 	ui.Pause()
 }
 
-// Uninstall полностью удаляет RandDesk установленным файлом удаления (спросит про ZeroTier);
+// Uninstall полностью удаляет RANDSEC установленным файлом удаления (спросит про ZeroTier);
 // если файла нет — удаляет только службу и правила брандмауэра.
 func Uninstall() {
 	if !ui.IsElevated() {
@@ -259,7 +259,7 @@ func Uninstall() {
 		log.Printf("удаление службы: %v", err)
 	}
 	closeFirewall()
-	fmt.Println("RandDesk удалён с этого ПК. Настройки остались в " + dataDir() + " — удалите папку, если они не нужны.")
+	fmt.Println("RANDSEC удалён с этого ПК. Настройки остались в " + dataDir() + " — удалите папку, если они не нужны.")
 	ui.Pause()
 }
 

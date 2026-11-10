@@ -12,7 +12,7 @@ import (
 
 	"golang.org/x/term"
 
-	"randdesk/internal/ui"
+	"randsec/internal/ui"
 )
 
 // setupInTerminal — «Настроить ПК» без браузера: роль, логин и пароль вводятся в терминале.
@@ -25,7 +25,7 @@ func setupInTerminal(base string) {
 		return
 	}
 	if !st.NodeSetup {
-		fmt.Println("\nЭтот ПК уже настроен. Страница RandDesk: " + base)
+		fmt.Println("\nЭтот ПК уже настроен. Страница RANDSEC: " + base)
 		return
 	}
 	fmt.Println("\n  Настройка ПК «" + hostname() + "»")
@@ -71,7 +71,7 @@ func setupInTerminal(base string) {
 	}
 	if role == RoleAdmin {
 		fmt.Println("\n  Готово: это главный ПК. Панель администратора: " + base)
-		fmt.Println("  На других ПК запустите RandDesk и введите тот же логин и пароль.")
+		fmt.Println("  На других ПК запустите RANDSEC и введите тот же логин и пароль.")
 		return
 	}
 	fmt.Println("\n  Готово. Ищу главный ПК…")

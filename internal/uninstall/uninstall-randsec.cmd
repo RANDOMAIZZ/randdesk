@@ -1,6 +1,6 @@
 @set "RD_SELF=%~f0" & powershell -NoProfile -ExecutionPolicy Bypass -Command "iex ((Get-Content -LiteralPath $env:RD_SELF -Raw -Encoding UTF8) -split '#RANDDESK-PS#', 3)[2]" & exit /b
 #RANDDESK-PS#
-# Полное удаление RandDesk с этого ПК (Windows).
+# Полное удаление RANDSEC с этого ПК (Windows).
 # Удаляет службу, программу, настройки и данные, правила брандмауэра и, по желанию, ZeroTier One.
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 $ErrorActionPreference = 'Continue'
@@ -14,13 +14,13 @@ if (-not $admin) {
 }
 
 Write-Host ''
-Write-Host '  Удаление RandDesk с этого ПК'
-Write-Host '  Будут удалены служба RandDesk, программа, все настройки (логин и пароль, список ПК,'
-Write-Host '  разрешения, журнал) и правила брандмауэра RandDesk.'
+Write-Host '  Удаление RANDSEC с этого ПК'
+Write-Host '  Будут удалены служба RANDSEC, программа, все настройки (логин и пароль, список ПК,'
+Write-Host '  разрешения, журнал) и правила брандмауэра RANDSEC.'
 Write-Host ''
 $ans = Read-Host '  Продолжить? [Д/н]'
 if ($ans -match '^(н|n|нет|no)$') { Write-Host '  Отменено.'; Start-Sleep 2; return }
-$zt = Read-Host '  Удалить также ZeroTier One (RandDesk ставил его для связи через интернет)? [Д/н]'
+$zt = Read-Host '  Удалить также ZeroTier One (RANDSEC ставил его для связи через интернет)? [Д/н]'
 $removeZT = -not ($zt -match '^(н|n|нет|no)$')
 Set-Location $env:TEMP
 
@@ -33,7 +33,7 @@ foreach ($svc in 'RandDesk', 'RandDeskAgent') {
     }
 }
 Start-Sleep -Seconds 2
-Get-Process randdesk* -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Get-Process randdesk*, randsec* -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
 # 2. ZeroTier One
 $dirs = @('C:\Program Files\RandDesk', "$env:ProgramData\RandDesk", "$env:APPDATA\RandDesk")
@@ -51,7 +51,7 @@ if ($removeZT) {
 
 # 3. Правила брандмауэра
 $rules = Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object {
-    $_.DisplayName -like 'RandDesk*' -or $_.DisplayName -like 'randdesk*.exe' -or
+    $_.DisplayName -like 'RandDesk*' -or $_.DisplayName -like 'RANDSEC*' -or $_.DisplayName -like 'randdesk*.exe' -or $_.DisplayName -like 'randsec*.exe' -or
     ($removeZT -and ($_.DisplayName -like 'ZeroTier*' -or $_.DisplayName -like 'zerotier*')) }
 $n = @($rules).Count
 $rules | Remove-NetFirewallRule -ErrorAction SilentlyContinue
@@ -74,5 +74,5 @@ foreach ($d in $dirs) {
 }
 
 Write-Host ''
-Write-Host '  RandDesk удалён с этого ПК.'
+Write-Host '  RANDSEC удалён с этого ПК.'
 Read-Host '  Нажмите Enter, чтобы закрыть окно'

@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -38,6 +39,7 @@ var (
 	procGetDC                    = user32.NewProc("GetDC")
 	procReleaseDC                = user32.NewProc("ReleaseDC")
 	procGetDpiForSystem          = user32.NewProc("GetDpiForSystem")
+	procSystemParametersInfoW    = user32.NewProc("SystemParametersInfoW")
 	procCreateFontW              = gdi32.NewProc("CreateFontW")
 	procSelectObject             = gdi32.NewProc("SelectObject")
 	procDeleteObject             = gdi32.NewProc("DeleteObject")
@@ -158,8 +160,35 @@ func over(p []byte, c rgba, cov float64) {
 	p[3] = byte(math.Min(255, a*255+float64(p[3])*inv))
 }
 
+// ---------- положение плашки ----------
+
+// Положения: top, top-left, top-right, bottom, bottom-left, bottom-right; off — не показывать.
+var (
+	posMu       sync.Mutex
+	indicatorAt = "top"
+)
+
+// SetIndicatorPos задаёт, где показывать плашку (настройка администратора).
+func SetIndicatorPos(pos string) {
+	switch pos {
+	case "top", "top-left", "top-right", "bottom", "bottom-left", "bottom-right", "off":
+	default:
+		pos = "top"
+	}
+	posMu.Lock()
+	indicatorAt = pos
+	posMu.Unlock()
+}
+
+func indicatorPos() string {
+	posMu.Lock()
+	defer posMu.Unlock()
+	return indicatorAt
+}
+
 type indicator struct {
 	text  string
+	pos   string
 	scale float64
 	w, h  int     // размер окна
 	pad   float64 // отступ под тень
@@ -186,7 +215,7 @@ func indicatorOf(hwnd uintptr) *indicator {
 
 func (in *indicator) layout() bool {
 	s := in.scale
-	fh := int(15 * s)
+	fh := int(11.5 * s)
 	face, _ := windows.UTF16PtrFromString("Segoe UI Semibold")
 	font, _, _ := procCreateFontW.Call(uintptr(-fh), 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, 4 /*ANTIALIASED_QUALITY*/, 0, uintptr(unsafe.Pointer(face)))
 	defer procDeleteObject.Call(font)
@@ -203,10 +232,10 @@ func (in *indicator) layout() bool {
 	procGetTextExtentPoint32W.Call(probe.dc, uintptr(unsafe.Pointer(&txt[0])), uintptr(n), uintptr(unsafe.Pointer(&sz)))
 	probe.free()
 
-	in.pad = 14 * s
-	capH := 38 * s
-	dotArea := 30 * s
-	capW := dotArea + float64(sz.CX) + 18*s
+	in.pad = 8 * s
+	capH := 22 * s
+	dotArea := 19 * s
+	capW := dotArea + float64(sz.CX) + 10*s
 	in.w, in.h = int(capW+2*in.pad), int(capH+2*in.pad)
 
 	// маска текста: GDI рисует белым по чёрному, яркость = покрытие
@@ -232,26 +261,26 @@ func (in *indicator) layout() bool {
 			px, py := float64(x)+0.5, float64(y)+0.5
 			p := in.base[(y*in.w+x)*4:][:4]
 			// мягкая тень, смещённая вниз
-			ds := roundRectSDF(px, py-3*s, x0, y0, x1, y1, r)
+			ds := roundRectSDF(px, py-1.5*s, x0, y0, x1, y1, r)
 			if ds > -2 {
-				sh := math.Exp(-math.Pow(math.Max(ds, 0)/(6*s), 2)) * 0.45
+				sh := math.Exp(-math.Pow(math.Max(ds, 0)/(4*s), 2)) * 0.28
 				over(p, rgba{0, 0, 0, 1}, sh)
 			}
 			d := roundRectSDF(px, py, x0, y0, x1, y1, r)
 			fill := clamp01(0.5 - d)
 			if fill > 0 {
 				t := (py - y0) / (y1 - y0) // вертикальный градиент «стекла»
-				over(p, rgba{0.075 + 0.05*(1-t), 0.08 + 0.05*(1-t), 0.11 + 0.06*(1-t), 0.80}, fill)
+				over(p, rgba{0.075 + 0.05*(1-t), 0.08 + 0.05*(1-t), 0.11 + 0.06*(1-t), 0.48}, fill)
 				// рамка: светлее сверху
 				ring := clamp01(1 - math.Abs(d+0.9*s)/(0.9*s))
-				over(p, rgba{1, 1, 1, 0.10 + 0.14*(1-t)}, ring*fill)
+				over(p, rgba{1, 1, 1, 0.07 + 0.10*(1-t)}, ring*fill)
 			}
 			if m := float64(mask.pix[(y*in.w+x)*4+1]) / 255; m > 0 {
-				over(p, rgba{0.96, 0.97, 1, 1}, m)
+				over(p, rgba{0.96, 0.97, 1, 0.88}, m)
 			}
 		}
 	}
-	in.dotX, in.dotY = in.pad+17*s, in.pad+capH/2
+	in.dotX, in.dotY = in.pad+11*s, in.pad+capH/2
 	return true
 }
 
@@ -260,23 +289,23 @@ func (in *indicator) render(now time.Time) (alpha byte, yOff int, done bool) {
 	copy(in.frame.pix, in.base)
 	s := in.scale
 	ph := math.Mod(now.Sub(in.start).Seconds(), 1.6) / 1.6
-	ringR := (5 + 9*ph) * s
-	ringA := 0.55 * (1 - ph)
+	ringR := (3 + 5*ph) * s
+	ringA := 0.5 * (1 - ph)
 	red := rgba{1, 0.27, 0.23, 1}
-	x0, x1 := int(in.dotX-16*s), int(in.dotX+16*s)
-	y0, y1 := int(in.dotY-16*s), int(in.dotY+16*s)
+	x0, x1 := int(in.dotX-10*s), int(in.dotX+10*s)
+	y0, y1 := int(in.dotY-10*s), int(in.dotY+10*s)
 	for y := max(y0, 0); y < min(y1, in.h); y++ {
 		for x := max(x0, 0); x < min(x1, in.w); x++ {
 			d := math.Hypot(float64(x)+0.5-in.dotX, float64(y)+0.5-in.dotY)
 			p := in.frame.pix[(y*in.w+x)*4:][:4]
 			// расходящееся кольцо
-			if rc := clamp01(1.2*s - math.Abs(d-ringR)); rc > 0 {
-				over(p, rgba{red.r, red.g, red.b, ringA}, rc/(1.2*s))
+			if rc := clamp01(0.9*s - math.Abs(d-ringR)); rc > 0 {
+				over(p, rgba{red.r, red.g, red.b, ringA}, rc/(0.9*s))
 			}
 			// свечение и сама точка
-			over(p, rgba{red.r, red.g, red.b, 0.35}, clamp01(1-(d-4.5*s)/(5*s))*0.6)
-			over(p, red, clamp01(4.5*s+0.5-d))
-			over(p, rgba{1, 0.75, 0.72, 1}, clamp01(1.6*s+0.5-math.Hypot(float64(x)+0.5-in.dotX+1.2*s, float64(y)+0.5-in.dotY+1.2*s))*0.7)
+			over(p, rgba{red.r, red.g, red.b, 0.3}, clamp01(1-(d-3*s)/(3.5*s))*0.6)
+			over(p, red, clamp01(3*s+0.5-d))
+			over(p, rgba{1, 0.75, 0.72, 1}, clamp01(1.1*s+0.5-math.Hypot(float64(x)+0.5-in.dotX+0.8*s, float64(y)+0.5-in.dotY+0.8*s))*0.7)
 		}
 	}
 	// появление: выезд сверху и проявление; исчезновение — обратное
@@ -288,13 +317,31 @@ func (in *indicator) render(now time.Time) (alpha byte, yOff int, done bool) {
 			done = true
 		}
 	}
-	return byte(255 * k), int(-(1 - k) * 24 * s), done
+	return byte(215 * k), int(-(1 - k) * 16 * s), done // плашка в целом полупрозрачная
 }
 
 func (in *indicator) present(now time.Time) bool {
 	alpha, yOff, done := in.render(now)
-	sw := sysMetric(0) // SM_CXSCREEN
-	dst := point{int32((sw - in.w) / 2), int32(int(4*in.scale) + yOff)}
+	// рабочая область основного монитора (без панели задач)
+	var wa struct{ L, T, R, B int32 }
+	if r, _, _ := procSystemParametersInfoW.Call(0x0030 /*SPI_GETWORKAREA*/, 0, uintptr(unsafe.Pointer(&wa)), 0); r == 0 {
+		wa.R, wa.B = int32(sysMetric(0)), int32(sysMetric(1))
+	}
+	m, pad := int32(6*in.scale), int32(in.pad)
+	var dst point
+	switch {
+	case strings.HasSuffix(in.pos, "left"):
+		dst.X = wa.L + m - pad
+	case strings.HasSuffix(in.pos, "right"):
+		dst.X = wa.R - int32(in.w) - m + pad
+	default:
+		dst.X = wa.L + (wa.R-wa.L-int32(in.w))/2
+	}
+	if strings.HasPrefix(in.pos, "bottom") {
+		dst.Y = wa.B - int32(in.h) - m + pad - int32(yOff) // выезжает снизу
+	} else {
+		dst.Y = wa.T + m - pad + int32(yOff) // выезжает сверху
+	}
 	sz := size{int32(in.w), int32(in.h)}
 	src := point{}
 	bf := blendFunc{0, 0, alpha, 1} // AC_SRC_OVER, AC_SRC_ALPHA
@@ -329,7 +376,15 @@ func indicatorProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 }
 
 // showIndicator показывает плашку и возвращает функцию, убирающую её.
-func showIndicator(text string) func() {
+// mandatory — показать, даже если администратор выключил плашку (например, «ввод отключён»).
+func showIndicator(text string, mandatory bool) func() {
+	pos := indicatorPos()
+	if pos == "off" {
+		if !mandatory {
+			return func() {}
+		}
+		pos = "top"
+	}
 	ready := make(chan uintptr, 1)
 	go func() {
 		runtime.LockOSThread()
@@ -341,7 +396,7 @@ func showIndicator(text string) func() {
 				dpi = d
 			}
 		}
-		in := &indicator{text: text, scale: float64(dpi) / 96, start: time.Now()}
+		in := &indicator{text: text, pos: pos, scale: float64(dpi) / 96, start: time.Now()}
 		if !in.layout() {
 			ready <- 0
 			return
@@ -396,5 +451,8 @@ func showIndicator(text string) func() {
 	}
 }
 
-// ShowIndicator показывает плашку вверху экрана (не попадает в захват) и возвращает функцию, убирающую её.
-func ShowIndicator(text string) func() { return showIndicator(text) }
+// ShowIndicator показывает плашку (не попадает в захват) и возвращает функцию, убирающую её.
+func ShowIndicator(text string) func() { return showIndicator(text, false) }
+
+// ShowNotice — то же, но показывается всегда, даже если плашка выключена в настройках.
+func ShowNotice(text string) func() { return showIndicator(text, true) }

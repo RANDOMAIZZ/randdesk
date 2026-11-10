@@ -17,8 +17,8 @@ import (
 	"github.com/gorilla/websocket"
 	"golang.org/x/sys/windows"
 
-	"randdesk/internal/desktop"
-	"randdesk/internal/proto"
+	"randsec/internal/desktop"
+	"randsec/internal/proto"
 )
 
 var (
@@ -139,7 +139,7 @@ func (h *hooker) apply(kbd, mouse bool) {
 		h.hideBar = nil
 	}
 	if need {
-		text := "RandDesk · администратор отключил "
+		text := "Администратор отключил "
 		switch {
 		case kbd && mouse:
 			text += "клавиатуру и мышь"
@@ -148,7 +148,7 @@ func (h *hooker) apply(kbd, mouse bool) {
 		default:
 			text += "мышь"
 		}
-		h.hideBar = desktop.ShowIndicator(text)
+		h.hideBar = desktop.ShowNotice(text)
 	}
 }
 
@@ -384,6 +384,7 @@ func Serve(ws *websocket.Conn) error {
 			Keyboard  bool   `json:"keyboard"`
 			Mouse     bool   `json:"mouse"`
 			Clipboard bool   `json:"clipboard"`
+			Indicator string `json:"indicator"`
 			Text      string `json:"text"`
 		}
 		if json.Unmarshal(data, &m) != nil {
@@ -391,6 +392,7 @@ func Serve(ws *websocket.Conn) error {
 		}
 		switch m.Type {
 		case "state":
+			desktop.SetIndicatorPos(m.Indicator)
 			h.apply(m.Keyboard, m.Mouse)
 			c.enabled.Store(m.Clipboard)
 		case "clip":

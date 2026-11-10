@@ -261,7 +261,7 @@
         btn.disabled = true; btn.textContent = 'Настраиваю…';
         try {
           await api('POST', '/api/node/setup', { role, user: user.value, password: pass.value });
-          root.replaceChildren(h('div', { class: 'boot' }, 'Готово, запускаю RandDesk…'));
+          root.replaceChildren(h('div', { class: 'boot' }, 'Готово, запускаю RANDSEC…'));
           const t0 = Date.now();
           const wait = async () => {
             try { const s = await api('GET', '/api/state'); if (!s.node_setup) return boot(); } catch {}
@@ -271,7 +271,7 @@
         } catch (ex) { err.textContent = ex.message; btn.disabled = false; btn.textContent = 'Настроить ПК'; }
       },
     },
-      h('div', { class: 'brand big' }, logo(), h('span', null, 'RandDesk')),
+      h('div', { class: 'brand big' }, logo(), h('span', null, 'RANDSEC')),
       h('h2', null, 'Настройка ПК «' + (st.host || 'этот ПК') + '»'),
       h('div', { class: 'role-list' },
         roleCard('admin', 'Главный ПК (администратор)', 'Отсюда вы управляете всеми ПК и раздаёте разрешения.'),
@@ -294,9 +294,9 @@
     } }, h('p', { class: 'muted small' }, 'Главный ПК в другой сети (через интернет)? Введите его внешний адрес — он есть в настройках главного ПК:'),
       h('div', { class: 'row' }, addr, btn));
     root.replaceChildren(h('div', { class: 'auth' }, themeFloat(), h('div', { class: 'auth-card' },
-      h('div', { class: 'brand big' }, logo(), h('span', null, 'RandDesk')),
+      h('div', { class: 'brand big' }, logo(), h('span', null, 'RANDSEC')),
       h('div', { class: 'spinner' }), status, err,
-      h('p', { class: 'muted small' }, 'Убедитесь, что главный ПК включён и на нём RandDesk настроен с тем же логином и паролем. ПК в одной сети (или в Radmin VPN) найдут друг друга сами.'),
+      h('p', { class: 'muted small' }, 'Убедитесь, что главный ПК включён и на нём RANDSEC настроен с тем же логином и паролем. ПК в одной сети (или в Radmin VPN) найдут друг друга сами.'),
       manual,
       h('button', { class: 'btn sm ghost', style: { marginTop: '10px' }, onclick: async () => {
         if (!await confirmDlg('Изменить логин и пароль?', 'Этот ПК вернётся к первой настройке, и вы сможете ввести логин и пароль заново.', 'Изменить')) return;
@@ -345,7 +345,7 @@
         } catch (ex) { err.textContent = ex.message; } finally { btn.disabled = false; }
       },
     },
-      h('div', { class: 'brand big' }, logo(), h('span', null, 'RandDesk')),
+      h('div', { class: 'brand big' }, logo(), h('span', null, 'RANDSEC')),
       h('p', { class: 'muted' }, setup ? 'Первый запуск: создайте учётную запись администратора.' : 'Вход в панель управления'),
       setup && !st.can_setup ? h('div', { class: 'form-err' }, 'Первичная настройка доступна только на ПК с хабом — откройте там http://localhost:8420') : null,
       user, pass, pass2, err, btn);
@@ -374,7 +374,7 @@
         } finally { btn.disabled = false; }
       },
     },
-      h('div', { class: 'brand big' }, logo(), h('span', null, 'RandDesk')),
+      h('div', { class: 'brand big' }, logo(), h('span', null, 'RANDSEC')),
       h('p', { class: 'muted' }, 'Введите 6-значный код из приложения-аутентификатора.'),
       code, err, btn,
       h('p', { class: 'muted small' }, 'Нет доступа к телефону? Введите один из резервных кодов (вида ABCD-EFGH).'),
@@ -396,7 +396,7 @@
 
   function renderShell() {
     const side = h('aside', { class: 'side' },
-      h('div', { class: 'brand' }, logo(), h('span', null, 'RandDesk')),
+      h('div', { class: 'brand' }, logo(), h('span', null, 'RANDSEC')),
       h('nav', null, (state.device ? NAV_DEVICE : NAV).map(([href, label, ic]) => h('a', { href, 'data-nav': href, title: label }, icon(ic), h('span', null, label)))),
       state.device
         ? h('div', { class: 'side-foot' }, h('span', { class: 'muted small ell', title: 'Управление — с разрешения администратора' }, 'Этот ПК: ' + state.device), themeButton())
@@ -459,7 +459,7 @@
       const adv = h('button', { class: 'btn sm ghost', type: 'button', onclick: () => { document.querySelector('.modal-wrap').remove(); showAddDeviceKey(k); } }, 'Другой способ — по ключу привязки');
       return modal('Добавить ПК', [
         h('ol', { class: 'steps' },
-          h('li', null, 'Скопируйте randdesk.exe на другой ПК (или скачайте со страницы релизов).'),
+          h('li', null, 'Скопируйте randsec.exe на другой ПК (или скачайте со страницы релизов).'),
           h('li', null, 'Запустите его двойным щелчком и разрешите установку.'),
           h('li', null, 'В открывшемся окне выберите «Обычный ПК», введите тот же логин и пароль, что здесь, и нажмите «Настроить ПК».')),
         h('p', { class: 'muted small' }, 'ПК в одной сети (или в Radmin VPN) найдут друг друга сами. Если другой ПК в другой сети, укажите на нём адрес этого ПК из «Настройки → Доступ из интернета».'),
@@ -480,8 +480,8 @@
       const list = checks.filter((c) => c.cb.checked).map((c) => c.a.url);
       const hub = list.join(',') || location.origin;
       const fp = k.fingerprint ? ` -fp ${k.fingerprint}` : '';
-      inst.code.textContent = `.\\randdesk.exe agent install -hub ${hub} -key ${k.key}${fp}`;
-      cons.code.textContent = `.\\randdesk.exe agent -hub ${hub} -key ${k.key}${fp}`;
+      inst.code.textContent = `.\\randsec.exe agent install -hub ${hub} -key ${k.key}${fp}`;
+      cons.code.textContent = `.\\randsec.exe agent -hub ${hub} -key ${k.key}${fp}`;
       warn.textContent = list.length ? '' : 'Выберите хотя бы один адрес.';
     };
     checks.forEach((c) => c.cb.addEventListener('change', upd));
@@ -489,7 +489,7 @@
     const hasPublic = addrs.some((a) => a.kind === 'public');
     modal('Добавить ПК', [
       h('ol', { class: 'steps' },
-        h('li', null, 'Скопируйте randdesk.exe на нужный ПК.'),
+        h('li', null, 'Скопируйте randsec.exe на нужный ПК.'),
         h('li', null, 'Отметьте адреса хаба. Агент пробует их по порядку: дома подключится по локальной сети, вне дома — через интернет.',
           h('div', { class: 'pick-list col' }, checks.map((c) => c.el)), warn,
           hasPublic ? null : h('p', { class: 'muted small' }, 'Внешнего адреса пока нет. Чтобы ПК подключался не только из локальной сети, включите «Доступ из интернета» в настройках.')),
@@ -527,7 +527,7 @@
             ? h('div', { class: 'empty' }, h('h2', null, 'Пока нет доступных ПК'),
               h('p', null, 'Этот ПК подключён к главному. Управлять другими ПК можно после того, как администратор разрешит это на главном ПК (страница «Доступ»).'))
             : h('div', { class: 'empty' }, h('h2', null, 'Пока нет ни одного ПК'),
-              h('p', null, 'Запустите randdesk.exe на другом ПК, выберите «Обычный ПК» и введите тот же логин и пароль.'),
+              h('p', null, 'Запустите randsec.exe на другом ПК, выберите «Обычный ПК» и введите тот же логин и пароль.'),
               h('button', { class: 'btn primary', onclick: showAddDevice }, 'Как добавить ПК'));
           grid.replaceChildren(empty);
         }
@@ -745,7 +745,7 @@
       lock[k] = !on;
       try { await send(); toast(`${label}: ${on ? 'включена' : 'отключена'}`, 'ok'); } catch (e) { lock[k] = on; throw e; }
     };
-    const selfNote = d.self ? 'На главном ПК клавиатуру и мышь отключить нельзя.' : 'Удалённое управление через RandDesk продолжит работать.';
+    const selfNote = d.self ? 'На главном ПК клавиатуру и мышь отключить нельзя.' : 'Удалённое управление через RANDSEC продолжит работать.';
     return h('div', { class: 'card input-card' },
       h('h3', null, 'Устройства ввода и буфер обмена'),
       h('div', { class: 'switches' },
@@ -886,26 +886,117 @@
     };
     applyProfile();
     const viewOnly = h('input', { type: 'checkbox' });
+    // способ сжатия: видео H.264 (сжимает видеокарта удалённого ПК, 60 к/с) или JPEG-плитки
+    const codecSel = h('select', { title: 'Сжатие картинки. H.264 сжимает видеокарта удалённого ПК — плавно и до 60 к/с; JPEG — запасной вариант' },
+      opt('auto', 'Видео H.264'), opt('jpeg', 'JPEG (совместимость)'));
+    codecSel.value = pref('codec', 'auto');
+    // игровой режим: мышь захватывается и передаётся относительными движениями (для шутеров и игр,
+    // которые прячут курсор и читают «сырой» ввод)
+    const gameBox = h('input', { type: 'checkbox', checked: pref('game', '0') === '1' });
+    const sensSel = h('select', { title: 'Чувствительность мыши в игровом режиме' },
+      ['0.5', '0.75', '1', '1.5', '2', '3'].map((v) => opt(v, 'мышь ×' + v)));
+    sensSel.value = pref('sens', '1');
+    const lockHint = h('div', { class: 'rd-lockhint', hidden: true });
     const fitBox = h('input', { type: 'checkbox', checked: pref('fit', '1') === '1' });
     const keysSel = h('select', { title: 'Отправить сочетание клавиш' }, opt('', 'Сочетания клавиш…'), opt('win', 'Win'), opt('alttab', 'Alt+Tab'),
       opt('ctrlshiftesc', 'Ctrl+Shift+Esc'), opt('altf4', 'Alt+F4'), opt('winr', 'Win+R'), opt('wind', 'Win+D'), opt('prtsc', 'PrintScreen'));
     const stats = h('span', { class: 'muted small mono rd-stats' }, '');
     const canvas = h('canvas', { class: 'rd-canvas', tabindex: '0', width: '1280', height: '720' });
     const overlay = h('div', { class: 'rd-overlay' }, 'Подключение…');
-    const stage = h('div', { class: 'rd-stage' + (fitBox.checked ? ' fit' : '') }, canvas, overlay);
+    const stage = h('div', { class: 'rd-stage' + (fitBox.checked ? ' fit' : '') }, canvas);
+    // подсказки лежат вне прокручиваемой области, поэтому всегда по центру видимой картинки
+    const view = h('div', { class: 'rd-view' }, stage, overlay, lockHint);
+    // сочетание клавиш для включения/выключения игрового режима (настраивается)
+    const keyName = (k) => !k || !k.code ? 'нет' : [k.ctrl && 'Ctrl', k.alt && 'Alt', k.shift && 'Shift', k.meta && 'Win',
+      k.code.replace(/^Key/, '').replace(/^Digit/, '').replace(/^Numpad/, 'Num ')].filter(Boolean).join('+');
+    let gameKey;
+    try { gameKey = JSON.parse(pref('gamekey', '') || 'null'); } catch { gameKey = null; }
+    if (gameKey === null) gameKey = { ctrl: true, alt: true, shift: false, meta: false, code: 'KeyG' };
+    const gkBtn = h('button', { class: 'btn sm ghost', title: 'Сочетание клавиш для включения и выключения игрового режима. Нажмите, затем введите новое сочетание (Esc — отмена, Backspace — без сочетания)' }, '⌨ ' + keyName(gameKey));
+    let recording = false;
     const fsBtn = h('button', { class: 'btn sm', title: 'Во весь экран (Win и Alt+Tab тоже уходят на удалённый ПК)' }, 'Во весь экран');
     const pasteBtn = h('button', { class: 'btn sm', title: 'Набрать текст на удалённом ПК' }, 'Вставить текст');
     const reBtn = h('button', { class: 'btn sm ghost' }, 'Переподключить');
     body.append(
-      h('div', { class: 'toolbar' }, profSel, monSel, qSel, scaleSel, fpsSel, keysSel, pasteBtn, fsBtn, reBtn),
-      h('div', { class: 'toolbar' }, h('label', { class: 'inline' }, fitBox, 'вписать в окно'), h('label', { class: 'inline' }, viewOnly, 'только просмотр'), stats),
-      stage);
+      h('div', { class: 'toolbar' }, profSel, monSel, qSel, scaleSel, fpsSel, codecSel, keysSel, pasteBtn, fsBtn, reBtn),
+      h('div', { class: 'toolbar' }, h('label', { class: 'inline' }, fitBox, 'вписать в окно'), h('label', { class: 'inline' }, viewOnly, 'только просмотр'),
+        h('label', { class: 'inline game-toggle', title: 'Для игр: мышь захватывается, движения передаются как от настоящей мыши' }, gameBox, '🎮 игровой режим'), gkBtn, sensSel, stats),
+      view);
 
     const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
     let ws = null, chain = Promise.resolve(), frames = 0, bytes = 0, rtt = null, capKind = '', desk = '';
     const pressed = new Map();
     const send = (o) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
-    const sendCfg = (extra) => send({ t: 'cfg', q: +qSel.value, fps: +fpsSel.value, scale: +scaleSel.value, ...extra });
+    // ---- видео H.264 через WebCodecs (нужен защищённый адрес: https или localhost) ----
+    let canH264 = false, codecInfo = '', vdec = null, vcodec = '', vsize = '', vids = [], vNeedKey = true, lastKeyReq = 0;
+    const h264Ready = (async () => {
+      try {
+        if (!window.VideoDecoder) return false;
+        const r = await VideoDecoder.isConfigSupported({ codec: 'avc1.640033', optimizeForLatency: true });
+        canH264 = !!r.supported;
+      } catch { canH264 = false; }
+      return canH264;
+    })();
+    const wantCodec = () => (codecSel.value === 'jpeg' || !canH264 ? 'jpeg' : 'h264');
+    const sendCfg = (extra) => send({ t: 'cfg', q: +qSel.value, fps: +fpsSel.value, scale: +scaleSel.value, codec: wantCodec(), ...extra });
+    const ackId = (sock, id) => { if (sock.readyState === 1) sock.send(JSON.stringify({ t: 'ack', id })); };
+    const askKey = () => { if (performance.now() - lastKeyReq > 500) { lastKeyReq = performance.now(); send({ t: 'key' }); } };
+    // профиль/уровень из SPS → строка кодека для декодера (avc1.PPCCLL)
+    const avcCodec = (d) => {
+      for (let i = 0; i + 6 < d.length; i++) {
+        if (d[i] === 0 && d[i + 1] === 0 && d[i + 2] === 1 && (d[i + 3] & 0x1f) === 7) {
+          return 'avc1.' + [d[i + 4], d[i + 5], d[i + 6]].map((b) => b.toString(16).padStart(2, '0')).join('');
+        }
+      }
+      return '';
+    };
+    const closeDecoder = () => {
+      if (vdec && vdec.state !== 'closed') { try { vdec.close(); } catch {} }
+      vdec = null; vids = []; vNeedKey = true;
+    };
+    function makeDecoder(sock, cs, W, H) {
+      closeDecoder();
+      const dec = new VideoDecoder({
+        output: (frame) => {
+          if (sock === ws) {
+            if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) { canvas.width = frame.displayWidth; canvas.height = frame.displayHeight; }
+            ctx.drawImage(frame, 0, 0);
+            frames++;
+            overlay.hidden = true;
+          }
+          frame.close();
+          const id = vids.shift();
+          if (id !== undefined) ackId(sock, id);
+        },
+        error: (e) => {
+          console.warn('H.264:', e);
+          if (vdec !== dec) return;
+          vids.forEach((id) => ackId(sock, id));
+          vdec = null; vids = []; vNeedKey = true;
+          askKey();
+        },
+      });
+      dec.configure({ codec: cs, codedWidth: W, codedHeight: H, optimizeForLatency: true });
+      vdec = dec; vcodec = cs; vsize = W + 'x' + H;
+    }
+    function onVideo(sock, buf, dv) {
+      const id = dv.getUint32(1, true), W = dv.getUint16(5, true), H = dv.getUint16(7, true), key = (dv.getUint8(9) & 1) === 1;
+      const data = new Uint8Array(buf, 10);
+      if (key) {
+        const cs = avcCodec(data) || 'avc1.640033';
+        if (!vdec || vdec.state !== 'configured' || cs !== vcodec || vsize !== W + 'x' + H) {
+          try { makeDecoder(sock, cs, W, H); } catch (e) { console.warn(e); closeDecoder(); }
+        }
+      }
+      if (!vdec || vdec.state !== 'configured' || (vNeedKey && !key)) { ackId(sock, id); askKey(); return; }
+      vNeedKey = false;
+      vids.push(id);
+      try {
+        vdec.decode(new EncodedVideoChunk({ type: key ? 'key' : 'delta', timestamp: id * 16667, data }));
+      } catch (e) {
+        console.warn(e); vids.pop(); ackId(sock, id); closeDecoder(); askKey();
+      }
+    }
 
     function onText(sock, m) {
       if (m.type === 'pong') rtt = performance.now() - m.ts;
@@ -914,6 +1005,10 @@
         const cur = String(m.monitor);
         monSel.replaceChildren(...(m.monitors || []).map((x) => opt(String(x.index), x.name + (x.primary ? ' · основной' : ''))));
         monSel.value = cur;
+      } else if (m.type === 'codec') {
+        codecInfo = m.codec === 'h264' ? 'H.264' + (m.encoder ? ' (' + m.encoder.replace(/ ?H\.?264 ?|Encoder|MFT/gi, ' ').replace(/\s+/g, ' ').trim() + ')' : '') : 'JPEG';
+        if (m.codec !== 'h264') closeDecoder();
+        if (m.reason && codecSel.value !== 'jpeg') toast('Видео H.264 недоступно на удалённом ПК, используется JPEG: ' + m.reason, 'bad');
       } else if (m.type === 'error') { overlay.textContent = m.message; overlay.hidden = false; }
     }
 
@@ -925,10 +1020,11 @@
       sock.binaryType = 'arraybuffer';
       ws = sock;
       chain = Promise.resolve();
-      sock.onopen = () => { sendCfg(); };
+      sock.onopen = () => { h264Ready.then(() => { if (sock === ws) sendCfg(); }); };
       sock.onmessage = (e) => {
         if (typeof e.data === 'string') { try { onText(sock, JSON.parse(e.data)); } catch {} return; }
         const buf = e.data, dv = new DataView(buf);
+        if (dv.getUint8(0) === 2) { bytes += buf.byteLength; onVideo(sock, buf, dv); return; }
         if (dv.getUint8(0) !== 1) return;
         bytes += buf.byteLength;
         const id = dv.getUint32(1, true), W = dv.getUint16(5, true), H = dv.getUint16(7, true), n = dv.getUint16(9, true);
@@ -959,6 +1055,7 @@
     function disconnect() {
       if (ws) { const s = ws; ws = null; s.onclose = null; try { s.close(); } catch {} }
       pressed.clear();
+      closeDecoder(); codecInfo = '';
     }
 
     // статистика и замер задержки
@@ -966,21 +1063,82 @@
       send({ t: 'ping', ts: performance.now() });
       if (ws && ws.readyState === 1) {
         stats.textContent = [ROUTES[dev.route] ? ROUTES[dev.route][0] : '', rtt == null ? 'RTT —' : `RTT ${rtt.toFixed(rtt < 10 ? 1 : 0)} мс`, `${frames} к/с`, fmtRate(bytes),
-          canvas.width + '×' + canvas.height, capKind, desk && desk.toLowerCase() !== 'default' ? 'рабочий стол: ' + desk : ''].filter(Boolean).join(' · ');
+          canvas.width + '×' + canvas.height, capKind, codecInfo, desk && desk.toLowerCase() !== 'default' ? 'рабочий стол: ' + desk : ''].filter(Boolean).join(' · ');
       }
       frames = 0; bytes = 0;
     }, 1000);
 
     // ---- ввод ----
+    // координаты на удалённом экране; в полноэкранном режиме картинка вписана с полями (object-fit: contain)
     const pos = (e) => {
       const r = canvas.getBoundingClientRect();
-      return { x: Math.round(((e.clientX - r.left) * canvas.width) / r.width), y: Math.round(((e.clientY - r.top) * canvas.height) / r.height) };
+      const k = Math.min(r.width / canvas.width, r.height / canvas.height) || 1;
+      const ox = (r.width - canvas.width * k) / 2, oy = (r.height - canvas.height * k) / 2;
+      const x = Math.round((e.clientX - r.left - ox) / k), y = Math.round((e.clientY - r.top - oy) / k);
+      return { x: Math.max(0, Math.min(canvas.width - 1, x)), y: Math.max(0, Math.min(canvas.height - 1, y)) };
     };
     const active = () => !viewOnly.checked && ws && ws.readyState === 1;
-    canvas.addEventListener('pointermove', (e) => { if (active()) send({ t: 'mm', ...pos(e) }); });
-    canvas.addEventListener('pointerdown', (e) => { canvas.focus(); try { canvas.setPointerCapture(e.pointerId); } catch {} });
-    canvas.addEventListener('mousedown', (e) => { e.preventDefault(); canvas.focus(); if (active()) send({ t: 'md', b: e.button, ...pos(e) }); });
-    canvas.addEventListener('mouseup', (e) => { e.preventDefault(); if (active()) send({ t: 'mu', b: e.button, ...pos(e) }); });
+    const locked = () => document.pointerLockElement === canvas;
+    const lockMouse = () => {
+      if (!gameBox.checked || locked()) return;
+      try {
+        const r = canvas.requestPointerLock({ unadjustedMovement: true }); // «сырые» движения без ускорения ОС
+        if (r && r.catch) r.catch(() => { try { const r2 = canvas.requestPointerLock(); if (r2 && r2.catch) r2.catch(() => {}); } catch {} });
+      } catch { try { canvas.requestPointerLock(); } catch {} }
+    };
+    // относительные движения копятся с дробной частью, чтобы чувствительность ×0.5 не теряла шаги
+    let accX = 0, accY = 0;
+    const moveRel = (e) => {
+      if (!locked() || !active()) return;
+      const k = +sensSel.value || 1;
+      accX += e.movementX * k; accY += e.movementY * k;
+      const dx = Math.trunc(accX), dy = Math.trunc(accY);
+      if (!dx && !dy) return;
+      accX -= dx; accY -= dy;
+      send({ t: 'mr', dx, dy });
+    };
+    const rawMoves = 'onpointerrawupdate' in canvas; // самый частый поток движений (Chrome/Edge)
+    canvas.addEventListener(rawMoves ? 'pointerrawupdate' : 'pointermove', moveRel);
+    canvas.addEventListener('pointermove', (e) => { if (!locked() && active()) send({ t: 'mm', ...pos(e) }); });
+    canvas.addEventListener('pointerdown', (e) => {
+      canvas.focus();
+      // в игровом режиме сначала захват мыши; привязку указателя (pointer capture) не включаем —
+      // с ней браузер может отказать в захвате
+      if (gameBox.checked && !locked()) { e.preventDefault(); lockMouse(); return; }
+      if (!locked() && !gameBox.checked) { try { canvas.setPointerCapture(e.pointerId); } catch {} }
+    });
+    canvas.addEventListener('mousedown', (e) => {
+      e.preventDefault(); canvas.focus();
+      if (gameBox.checked && !locked()) return; // этот щелчок только захватывает мышь
+      if (active()) send(locked() ? { t: 'md', b: e.button, r: true } : { t: 'md', b: e.button, ...pos(e) });
+    });
+    canvas.addEventListener('mouseup', (e) => {
+      e.preventDefault();
+      if (active()) send(locked() ? { t: 'mu', b: e.button, r: true } : { t: 'mu', b: e.button, ...pos(e) });
+    });
+    const onLock = () => {
+      const on = locked();
+      stage.classList.toggle('game-locked', on);
+      if (!on) { accX = accY = 0; send({ t: 'rel' }); pressed.clear(); }
+      lockHint.hidden = !(gameBox.checked);
+      lockHint.textContent = on
+        ? (document.fullscreenElement ? '🎮 Мышь захвачена · удерживайте Esc, чтобы выйти' : '🎮 Мышь захвачена · Esc — освободить')
+        : '🎮 Игровой режим · щёлкните по картинке, чтобы захватить мышь';
+      lockHint.classList.toggle('on', on);
+    };
+    document.addEventListener('pointerlockchange', onLock);
+    const onLockErr = () => toast('Браузер не дал захватить мышь. Щёлкните по картинке ещё раз (в полноэкранном режиме — после входа в него).', 'bad');
+    document.addEventListener('pointerlockerror', onLockErr);
+    gameBox.addEventListener('change', () => {
+      setPref('game', gameBox.checked ? '1' : '0');
+      sensSel.hidden = !gameBox.checked;
+      if (!gameBox.checked && locked()) document.exitPointerLock();
+      onLock();
+      canvas.focus();
+    });
+    sensSel.addEventListener('change', () => { setPref('sens', sensSel.value); canvas.focus(); });
+    sensSel.hidden = !gameBox.checked;
+    onLock();
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
@@ -988,6 +1146,43 @@
       const k = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? 800 : 1;
       send({ t: 'wh', dy: Math.round(-e.deltaY * k * 1.2), dx: Math.round(e.deltaX * k * 1.2) });
     }, { passive: false });
+    // запись нового сочетания и переключение игрового режима — раньше, чем клавиши уйдут на удалённый ПК
+    const isMod = (c) => /^(Control|Alt|Shift|Meta|OS)(Left|Right)?$/.test(c);
+    const onKey = (e) => {
+      if (recording) {
+        e.preventDefault(); e.stopPropagation();
+        if (isMod(e.code)) return;
+        recording = false; gkBtn.classList.remove('active');
+        if (e.code === 'Escape') { gkBtn.textContent = '⌨ ' + keyName(gameKey); return; }
+        gameKey = e.code === 'Backspace' ? { code: '' } : { ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey, code: e.code };
+        if (gameKey.code && !gameKey.ctrl && !gameKey.alt && !gameKey.meta && !/^F\d+$/.test(gameKey.code)) {
+          toast('Добавьте Ctrl, Alt или Win — иначе клавиша не дойдёт до игры', 'bad');
+          gameKey = JSON.parse(pref('gamekey', '') || 'null') || { ctrl: true, alt: true, code: 'KeyG' };
+        }
+        setPref('gamekey', JSON.stringify(gameKey));
+        gkBtn.textContent = '⌨ ' + keyName(gameKey);
+        return;
+      }
+      const k = gameKey;
+      if (!k || !k.code || e.code !== k.code || e.repeat) return;
+      if (!!k.ctrl !== e.ctrlKey || !!k.alt !== e.altKey || !!k.shift !== e.shiftKey || !!k.meta !== e.metaKey) return;
+      // переключаем, только когда работа идёт с удалённым экраном
+      if (document.activeElement !== canvas && !locked() && document.fullscreenElement !== view) return;
+      e.preventDefault(); e.stopPropagation();
+      // уже отправленные модификаторы отпускаем, чтобы они не «залипли» на удалённом ПК
+      for (const [c, kc] of pressed) send({ t: 'ku', c, k: kc });
+      pressed.clear();
+      gameBox.checked = !gameBox.checked;
+      gameBox.dispatchEvent(new Event('change'));
+      if (gameBox.checked) lockMouse(); // нажатие клавиши даёт право захватить мышь
+      toast(gameBox.checked ? '🎮 Игровой режим включён' : 'Игровой режим выключен');
+    };
+    document.addEventListener('keydown', onKey, true);
+    gkBtn.addEventListener('click', () => {
+      recording = !recording;
+      gkBtn.classList.toggle('active', recording);
+      gkBtn.textContent = recording ? '⌨ нажмите сочетание…' : '⌨ ' + keyName(gameKey);
+    });
     canvas.addEventListener('keydown', (e) => {
       if (!active()) return;
       e.preventDefault();
@@ -1015,6 +1210,11 @@
       canvas.focus();
     });
     monSel.addEventListener('change', () => sendCfg({ mon: +monSel.value }));
+    codecSel.addEventListener('change', () => {
+      setPref('codec', codecSel.value);
+      if (codecSel.value !== 'jpeg' && !canH264) toast(window.isSecureContext ? 'Этот браузер не умеет декодировать H.264 — остаётся JPEG' : 'Для H.264 откройте панель по https:// или через localhost — сейчас остаётся JPEG', 'bad');
+      sendCfg();
+    });
     fitBox.addEventListener('change', () => { setPref('fit', fitBox.checked ? '1' : '0'); stage.classList.toggle('fit', fitBox.checked); });
     keysSel.addEventListener('change', () => {
       const c = KEY_COMBOS[keysSel.value];
@@ -1031,12 +1231,13 @@
     });
     fsBtn.addEventListener('click', async () => {
       try {
-        await stage.requestFullscreen();
+        await view.requestFullscreen();
         if (navigator.keyboard && navigator.keyboard.lock) await navigator.keyboard.lock().catch(() => {});
         canvas.focus();
+        lockMouse(); // в игровом режиме мышь захватывается сразу
       } catch (e) { toast('Полноэкранный режим недоступен: ' + e.message, 'bad'); }
     });
-    const onFs = () => { if (!document.fullscreenElement && navigator.keyboard && navigator.keyboard.unlock) navigator.keyboard.unlock(); };
+    const onFs = () => { if (!document.fullscreenElement && navigator.keyboard && navigator.keyboard.unlock) navigator.keyboard.unlock(); onLock(); };
     document.addEventListener('fullscreenchange', onFs);
     reBtn.addEventListener('click', connect);
 
@@ -1044,7 +1245,11 @@
     return () => {
       clearInterval(timer);
       document.removeEventListener('fullscreenchange', onFs);
-      if (document.fullscreenElement === stage) document.exitFullscreen().catch(() => {});
+      document.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('pointerlockchange', onLock);
+      document.removeEventListener('pointerlockerror', onLockErr);
+      if (locked()) document.exitPointerLock();
+      if (document.fullscreenElement === view) document.exitFullscreen().catch(() => {});
       disconnect();
     };
   }
@@ -1300,7 +1505,7 @@
             const cb = h('input', { type: 'checkbox', checked: (grants[from.id] || []).includes(to.id), title: `${from.name} может управлять ${to.name}` });
             cb.addEventListener('change', async () => {
               if (cb.checked && to.self && !await confirmDlg('Разрешить управлять главным ПК?',
-                `С ПК «${from.name}» можно будет открыть рабочий стол, консоль и процессы главного ПК. Сам раздел администратора RandDesk ему недоступен, но через рабочий стол он увидит всё, что открыто на главном ПК (в том числе открытую панель RandDesk).`, 'Разрешить', 'danger')) {
+                `С ПК «${from.name}» можно будет открыть рабочий стол, консоль и процессы главного ПК. Сам раздел администратора RANDSEC ему недоступен, но через рабочий стол он увидит всё, что открыто на главном ПК (в том числе открытую панель RANDSEC).`, 'Разрешить', 'danger')) {
                 cb.checked = false;
                 return;
               }
@@ -1316,7 +1521,7 @@
           })))));
       box.replaceChildren(clipCard, h('div', { class: 'card', style: { marginTop: '14px' } }, h('h3', null, 'Кто кем управляет'),
         h('div', { class: 'table-wrap' }, table),
-        h('p', { class: 'muted small', style: { marginTop: '10px' } }, 'Разрешённый ПК видит выбранные ПК на своей странице RandDesk (http://localhost:8420) и может открыть их рабочий стол, консоль и т. д. Главный ПК управляет всеми всегда. Панель администратора (настройки, разрешения, отключение ввода) доступна только на главном ПК.')));
+        h('p', { class: 'muted small', style: { marginTop: '10px' } }, 'Разрешённый ПК видит выбранные ПК на своей странице RANDSEC (http://localhost:8420) и может открыть их рабочий стол, консоль и т. д. Главный ПК управляет всеми всегда. Панель администратора (настройки, разрешения, отключение ввода) доступна только на главном ПК.')));
     };
     load().catch((e) => toast(e.message, 'bad'));
     return null;
@@ -1394,6 +1599,36 @@
     const usersCard = h('div', { class: 'card' }, h('h3', null, 'Пользователи'));
     const netCard = h('div', { class: 'card' }, h('h3', null, 'Доступ из интернета'));
     const ztCard = h('div', { class: 'card' }, h('h3', null, 'Сеть через интернет (ZeroTier)'));
+    const indCard = h('div', { class: 'card' }, h('h3', null, 'Плашка на управляемом ПК'));
+    const loadInd = async () => {
+      let cur;
+      try { cur = (await api('GET', '/api/indicator')).pos; } catch (e) { if (e.status === 404) { indCard.remove(); return; } throw e; }
+      const POS = [['top-left', 'Вверху слева'], ['top', 'Вверху по центру'], ['top-right', 'Вверху справа'],
+        ['bottom-left', 'Внизу слева'], ['bottom', 'Внизу по центру'], ['bottom-right', 'Внизу справа']];
+      const screen = h('div', { class: 'ind-screen' + (cur === 'off' ? ' off' : '') });
+      const pill = h('div', { class: 'ind-pill' }, h('i'), 'Удалённое управление');
+      const place = (p) => { screen.dataset.pos = p; };
+      const save = async (p) => {
+        try {
+          await api('POST', '/api/indicator', { pos: p });
+          cur = p;
+          screen.classList.toggle('off', p === 'off');
+          if (p !== 'off') place(p);
+          buttons.forEach((b) => b.classList.toggle('active', b.dataset.pos === p));
+          toast(p === 'off' ? 'Плашка больше не показывается' : 'Положение плашки сохранено', 'ok');
+        } catch (e) { toast(e.message, 'bad'); }
+      };
+      // экран-превью: щелчок по месту выбирает положение
+      const spots = POS.map(([p, label]) => h('button', { type: 'button', class: 'ind-spot', 'data-pos': p, title: label, onclick: () => save(p) }));
+      screen.append(...spots, pill);
+      place(cur === 'off' ? 'top' : cur);
+      const buttons = [...POS.map(([p, label]) => h('button', { type: 'button', class: 'btn sm' + (p === cur ? ' active' : ''), 'data-pos': p, onclick: () => save(p) }, label)),
+        h('button', { type: 'button', class: 'btn sm danger-ghost' + (cur === 'off' ? ' active' : ''), 'data-pos': 'off', onclick: () => save('off') }, 'Не показывать')];
+      indCard.replaceChildren(h('h3', null, 'Плашка на управляемом ПК'),
+        h('p', { class: 'muted' }, 'Маленькая полупрозрачная плашка «Удалённое управление» на экране ПК, пока к нему подключён удалённый рабочий стол. В саму трансляцию она не попадает. Выберите место на экране или отключите её.'),
+        h('div', { class: 'ind-wrap' }, screen, h('div', { class: 'ind-buttons' }, buttons)),
+        h('p', { class: 'muted small', style: { marginTop: '10px' } }, 'Предупреждение «администратор отключил клавиатуру и мышь» показывается всегда — чтобы человек за ПК понимал, что происходит.'));
+    };
     let ztTimer = null;
     const loadZT = async () => {
       clearTimeout(ztTimer);
@@ -1416,7 +1651,32 @@
           h('span', { class: 'k' }, 'Состояние'), state,
           z.network ? h('span', { class: 'k' }, 'Сеть') : '', z.network ? h('span', { class: 'mono small' }, z.network) : '',
           z.addresses && z.addresses.length ? h('span', { class: 'k' }, 'Адрес этого ПК') : '', z.addresses && z.addresses.length ? h('span', { class: 'mono small' }, z.addresses.join(', ')) : ''),
-        h('p', { class: 'muted small', style: { marginTop: '10px' } }, 'Как это работает: RandDesk сам ставит ZeroTier на все ПК, а этот ПК создаёт свою закрытую сеть и управляет ею — аккаунт на сайте ZeroTier не нужен. Номер сети передаётся остальным ПК в зашифрованном виде через общедоступный сервис ntfy.sh; прочитать его и попроситься в сеть может только ПК с тем же логином и паролем.'));
+        h('p', { class: 'muted small', style: { marginTop: '10px' } }, 'Как это работает: RANDSEC сам ставит ZeroTier на все ПК, а этот ПК создаёт свою закрытую сеть и управляет ею — аккаунт на сайте ZeroTier не нужен. Номер сети передаётся остальным ПК в зашифрованном виде через общедоступный сервис ntfy.sh; прочитать его и попроситься в сеть может только ПК с тем же логином и паролем.'));
+    };
+
+    const isMe = (n) => n.toLowerCase() === (state.user || '').toLowerCase();
+    let me = null;
+
+    const loadMe = async () => {
+      me = await api('GET', '/api/me');
+      const actions = me.totp
+        ? [h('button', { class: 'btn sm', onclick: async () => {
+            const v = await confirmWithPassword('Новые резервные коды', 'Старые резервные коды перестанут работать.', 'Создать', 'primary', true);
+            if (!v) return;
+            try { const r = await api('POST', '/api/2fa/recovery', v); await showRecovery(r.recovery); loadMe(); } catch (e) { toast(e.message, 'bad'); }
+          } }, 'Новые резервные коды'),
+          h('button', { class: 'btn sm danger-ghost', onclick: async () => {
+            const v = await confirmWithPassword('Выключить 2FA?', 'Для входа снова будет достаточно только пароля.', 'Выключить', 'danger', true);
+            if (!v) return;
+            try { await api('POST', '/api/2fa/disable', v); toast('Двухфакторная аутентификация выключена', 'ok'); reloadAll(); } catch (e) { toast(e.message, 'bad'); }
+          } }, 'Выключить')]
+        : [h('button', { class: 'btn sm primary', onclick: () => enable2FA(reloadAll) }, 'Включить 2FA')];
+      tfaCard.replaceChildren(h('h3', null, 'Двухфакторная аутентификация (2FA)'),
+        h('p', { class: 'muted' }, 'Кроме пароля при входе понадобится код из приложения на телефоне. Обязательно включите, если хаб доступен из интернета.'),
+        h('div', { class: 'kv', style: { marginBottom: '12px' } },
+          h('span', { class: 'k' }, 'Состояние'), h('span', { class: me.totp ? 'ok-text' : 'bad-text' }, me.totp ? 'включена' : 'выключена'),
+          me.totp ? h('span', { class: 'k' }, 'Резервных кодов') : null, me.totp ? h('span', null, String(me.recovery_left)) : null),
+        h('div', { class: 'key-box' }, actions));
     };
 
     const addUser = async () => {
@@ -1500,6 +1760,7 @@
       loadUsers().catch((e) => toast(e.message, 'bad'));
       loadNet().catch((e) => toast(e.message, 'bad'));
       loadZT().catch((e) => toast(e.message, 'bad'));
+      loadInd().catch((e) => toast(e.message, 'bad'));
     };
 
     view.append(h('div', { class: 'page-head' }, h('h1', null, 'Настройки')),
@@ -1516,6 +1777,7 @@
           pErr, h('button', { class: 'btn primary', type: 'submit' }, 'Сменить пароль')),
         usersCard,
         ztCard,
+        indCard,
         netCard,
         h('div', { class: 'card' }, h('h3', null, 'Ключ привязки ПК'),
           h('p', { class: 'muted' }, 'По этому ключу агенты привязываются к вашему хабу. После смены ключа уже привязанные ПК продолжат работать, а новые нужно будет привязывать новым ключом.'),

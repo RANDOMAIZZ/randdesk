@@ -8,13 +8,13 @@ import (
 
 	"golang.org/x/sys/windows/registry"
 
-	"randdesk/internal/proto"
-	"randdesk/internal/uninstall"
+	"randsec/internal/proto"
+	"randsec/internal/uninstall"
 )
 
 const uninstallKey = `Software\Microsoft\Windows\CurrentVersion\Uninstall\RandDesk`
 
-// writeUninstaller кладёт файл полного удаления в папку программы и добавляет RandDesk
+// writeUninstaller кладёт файл полного удаления в папку программы и добавляет RANDSEC
 // в «Параметры → Приложения» (там его можно удалить обычной кнопкой «Удалить»).
 func writeUninstaller(exe string) (string, error) {
 	dir := filepath.Dir(exe)
@@ -27,13 +27,13 @@ func writeUninstaller(exe string) (string, error) {
 		return script, err
 	}
 	defer k.Close()
-	k.SetStringValue("DisplayName", "RandDesk")
+	k.SetStringValue("DisplayName", "RANDSEC")
 	k.SetStringValue("DisplayVersion", proto.Version)
-	k.SetStringValue("Publisher", "RandDesk")
+	k.SetStringValue("Publisher", "RANDSEC")
 	k.SetStringValue("DisplayIcon", exe)
 	k.SetStringValue("InstallLocation", dir)
 	k.SetStringValue("UninstallString", `"`+script+`"`)
-	k.SetStringValue("URLInfoAbout", "https://github.com/RANDOMAIZZ/randdesk")
+	k.SetStringValue("URLInfoAbout", "https://github.com/RANDOMAIZZ/randsec")
 	k.SetDWordValue("NoModify", 1)
 	k.SetDWordValue("NoRepair", 1)
 	if fi, err := os.Stat(exe); err == nil {

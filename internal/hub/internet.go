@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"randdesk/internal/upnp"
+	"randsec/internal/upnp"
 )
 
 // InternetStatus — состояние доступа к хабу из интернета.
@@ -105,12 +105,12 @@ func (n *internet) step() time.Duration {
 		igd, err = upnp.Discover(ctx)
 	}
 	if err == nil {
-		err = igd.AddMapping(ctx, n.port, n.port, "RandDesk Hub", mappingLease)
+		err = igd.AddMapping(ctx, n.port, n.port, "RANDSEC Hub", mappingLease)
 		if err != nil {
 			// роутер мог смениться или перезагрузиться — попробуем найти заново
 			if g2, derr := upnp.Discover(ctx); derr == nil {
 				igd = g2
-				err = igd.AddMapping(ctx, n.port, n.port, "RandDesk Hub", mappingLease)
+				err = igd.AddMapping(ctx, n.port, n.port, "RANDSEC Hub", mappingLease)
 			}
 		}
 	}

@@ -18,11 +18,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"randdesk/internal/agent"
-	"randdesk/internal/hub"
-	"randdesk/internal/pair"
-	"randdesk/internal/proto"
-	"randdesk/web"
+	"randsec/internal/agent"
+	"randsec/internal/hub"
+	"randsec/internal/pair"
+	"randsec/internal/proto"
+	"randsec/web"
 )
 
 // Options — где хранить данные и какие порты занимать.
@@ -70,7 +70,7 @@ func Run(o Options, stop <-chan struct{}) error {
 		default:
 		}
 		if err != nil {
-			log.Printf("RandDesk: %v; повтор через 10 с", err)
+			log.Printf("RANDSEC: %v; повтор через 10 с", err)
 			select {
 			case <-stop:
 				return nil

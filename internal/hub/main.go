@@ -15,9 +15,9 @@ import (
 	"syscall"
 	"time"
 
-	"randdesk/internal/pair"
-	"randdesk/internal/proto"
-	"randdesk/internal/ui"
+	"randsec/internal/pair"
+	"randsec/internal/proto"
+	"randsec/internal/ui"
 )
 
 // Options — параметры запуска хаба.
@@ -127,7 +127,7 @@ func Start(o Options) (*Hub, error) {
 
 	ln, err := net.Listen("tcp", o.Listen)
 	if err != nil {
-		return nil, fmt.Errorf("не удалось занять порт %s: %v\nВозможно, RandDesk уже запущен (проверьте http://localhost:%s) или порт занят другой программой", portStr, err, portStr)
+		return nil, fmt.Errorf("не удалось занять порт %s: %v\nВозможно, RANDSEC уже запущен (проверьте http://localhost:%s) или порт занят другой программой", portStr, err, portStr)
 	}
 
 	srv := NewServer(store, audit, portStr, fingerprint)
@@ -136,7 +136,7 @@ func Start(o Options) (*Hub, error) {
 	go srv.net.run()
 	go srv.janitor()
 
-	log.Printf("RandDesk hub %s, данные: %s", proto.Version, o.DataDir)
+	log.Printf("RANDSEC hub %s, данные: %s", proto.Version, o.DataDir)
 	log.Printf("веб-интерфейс на этом ПК: http://localhost:%s", portStr)
 	if fingerprint != "" {
 		log.Printf("отпечаток сертификата хаба: %s", fingerprint)

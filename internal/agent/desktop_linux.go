@@ -17,9 +17,9 @@ import (
 	"syscall"
 	"time"
 
-	"randdesk/internal/desktop"
-	"randdesk/internal/evdev"
-	"randdesk/internal/session"
+	"randsec/internal/desktop"
+	"randsec/internal/evdev"
+	"randsec/internal/session"
 )
 
 // display — рабочий стол пользователя, к которому подключаются помощники.
@@ -134,8 +134,8 @@ func startHelper(args []string) (*helperProc, error) {
 	return hp, nil
 }
 
-func startDesktopHelper(cfgPath, session, hub string) error {
-	_, err := startHelper([]string{"agent", "desktop-helper", "-config", cfgPath, "-session", session, "-hub", hub})
+func startDesktopHelper(cfgPath, session, hub, indicator string) error {
+	_, err := startHelper([]string{"agent", "desktop-helper", "-config", cfgPath, "-session", session, "-hub", hub, "-indicator", indicator})
 	return err
 }
 

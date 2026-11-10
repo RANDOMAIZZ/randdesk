@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"randdesk/internal/pair"
+	"randsec/internal/pair"
 )
 
 // DefaultServer — общедоступный сервер ntfy.

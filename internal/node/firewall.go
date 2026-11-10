@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// openFirewall разрешает входящие подключения RandDesk (TCP 8420 — страница и связь с ПК,
+// openFirewall разрешает входящие подключения RANDSEC (TCP 8420 — страница и связь с ПК,
 // UDP 8421 — поиск ПК в сети).
 func openFirewall(exe string) error {
 	if runtime.GOOS == "windows" {

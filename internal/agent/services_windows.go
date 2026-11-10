@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"randdesk/internal/proto"
+	"randsec/internal/proto"
 )
 
 const selfServiceName = "RandDeskAgent"
