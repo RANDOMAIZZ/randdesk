@@ -1,0 +1,1215 @@
+'use strict';
+(() => {
+  const root = document.getElementById('root');
+  const state = { user: null, hubUrls: [], cleanup: null };
+
+  // ---------- DOM-утилиты ----------
+  function h(tag, attrs, ...kids) {
+    const el = document.createElement(tag);
+    if (attrs) {
+      for (const [k, v] of Object.entries(attrs)) {
+        if (v == null || v === false) continue;
+        if (k === 'class') el.className = v;
+        else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
+        else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2), v);
+        else if (k === 'checked' || k === 'value' || k === 'disabled') el[k] = v;
+        else el.setAttribute(k, v === true ? '' : v);
+      }
+    }
+    for (const c of kids.flat(Infinity)) {
+      if (c == null || c === false) continue;
+      el.append(c instanceof Node ? c : String(c));
+    }
+    return el;
+  }
+
+  const ICONS = {
+    devices: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+    run: '<path d="M4 17l6-5-6-5M12 19h8"/>',
+    log: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+    settings: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
+    logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
+    power: '<path d="M18.36 6.64a9 9 0 1 1-12.73 0M12 2v10"/>',
+    terminal: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/>',
+  };
+  function icon(name) {
+    const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 24 24');
+    s.setAttribute('class', 'ic');
+    s.innerHTML = ICONS[name] || ''; // только статические строки
+    return s;
+  }
+  function logo() {
+    const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 32 32');
+    s.setAttribute('class', 'logo');
+    s.innerHTML = '<rect width="32" height="32" rx="8" fill="#4f8cff"/><rect x="7" y="9" width="18" height="12" rx="2" fill="none" stroke="#fff" stroke-width="2.4"/><path d="M12 25h8" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>';
+    return s;
+  }
+
+  // ---------- форматирование ----------
+  const fmtBytes = (b) => {
+    if (b == null || isNaN(b)) return '—';
+    const u = ['Б', 'КБ', 'МБ', 'ГБ', 'ТБ'];
+    let i = 0;
+    while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+    return (i ? b.toFixed(b < 10 ? 1 : 0) : Math.round(b)) + ' ' + u[i];
+  };
+  const fmtRate = (b) => fmtBytes(b) + '/с';
+  const fmtPct = (v) => (v == null || isNaN(v) ? '—' : v.toFixed(v < 10 ? 1 : 0) + '%');
+  const pct = (a, b) => (b ? (a / b) * 100 : 0);
+  const fmtUptime = (s) => {
+    if (!s) return '—';
+    const d = Math.floor(s / 86400), hh = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+    return d ? `${d} д ${hh} ч` : hh ? `${hh} ч ${m} мин` : `${m} мин`;
+  };
+  const fmtAgo = (iso) => {
+    const t = new Date(iso).getTime();
+    if (!t || t < 0) return 'никогда';
+    const s = (Date.now() - t) / 1000;
+    if (s < 60) return 'только что';
+    if (s < 3600) return Math.floor(s / 60) + ' мин назад';
+    if (s < 86400) return Math.floor(s / 3600) + ' ч назад';
+    return new Date(t).toLocaleString('ru-RU');
+  };
+  const fmtTime = (iso) => new Date(iso).toLocaleString('ru-RU');
+  const level = (p) => (p >= 90 ? 'bad' : p >= 75 ? 'warn' : '');
+  const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const shortOS = (info) => (info && info.platform ? info.platform.replace(/^Microsoft\s+/i, '') : '');
+  const primaryIP = (d) => {
+    for (const n of (d.info && d.info.nics) || []) for (const ip of n.ips || []) if (!ip.startsWith('169.254.')) return ip;
+    return d.last_ip || '';
+  };
+  const hasMac = (d) => ((d.info && d.info.nics) || []).some((n) => n.mac);
+  const enc = encodeURIComponent;
+  const rpc = (id, m) => `/api/devices/${enc(id)}/rpc/${m}`;
+
+  // ---------- API ----------
+  class ApiError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
+  async function api(method, path, body) {
+    const opt = { method, headers: { 'X-Requested-With': 'randdesk' }, credentials: 'same-origin' };
+    if (body !== undefined) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
+    let r;
+    try { r = await fetch(path, opt); } catch { throw new ApiError(0, 'Хаб недоступен'); }
+    const txt = await r.text();
+    let data = null;
+    if (txt) { try { data = JSON.parse(txt); } catch { data = txt; } }
+    if (!r.ok) {
+      if (r.status === 401 && state.user && !path.startsWith('/api/login')) { state.user = null; boot(); }
+      throw new ApiError(r.status, (data && data.error) || r.statusText);
+    }
+    return data;
+  }
+
+  function poll(fn, ms) {
+    let stopped = false, t = null;
+    const tick = async () => {
+      if (stopped) return;
+      try { await fn(); } catch (e) { if (e.status !== 401) console.warn(e); }
+      if (!stopped) t = setTimeout(tick, ms);
+    };
+    tick();
+    return () => { stopped = true; clearTimeout(t); };
+  }
+
+  function toast(msg, kind = '') {
+    const el = h('div', { class: 'toast ' + kind }, msg);
+    document.getElementById('toasts').append(el);
+    setTimeout(() => el.classList.add('out'), 3800);
+    setTimeout(() => el.remove(), 4300);
+  }
+
+  async function copyText(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = h('textarea', { style: { position: 'fixed', opacity: '0' } });
+      ta.value = text;
+      document.body.append(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    }
+    toast('Скопировано', 'ok');
+  }
+
+  function modal(title, content, actions) {
+    actions = actions || [{ label: 'Закрыть', value: null }];
+    return new Promise((resolve) => {
+      const close = (v) => { wrap.remove(); document.removeEventListener('keydown', onKey); resolve(v); };
+      const onKey = (e) => { if (e.key === 'Escape') close(null); };
+      const submitA = actions.find((a) => a.submit);
+      const box = h('form', {
+        class: 'modal',
+        onsubmit: (e) => { e.preventDefault(); if (submitA) close(submitA.getValue ? submitA.getValue() : submitA.value); },
+      },
+        h('div', { class: 'modal-head' }, h('h2', null, title),
+          h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Закрыть', onclick: () => close(null) }, '×')),
+        h('div', { class: 'modal-body' }, content),
+        h('div', { class: 'modal-foot' }, actions.map((a) =>
+          h('button', { class: 'btn ' + (a.kind || ''), type: a.submit ? 'submit' : 'button', onclick: a.submit ? null : () => close(a.value) }, a.label))));
+      const wrap = h('div', { class: 'modal-wrap', onmousedown: (e) => { if (e.target === wrap) close(null); } }, box);
+      document.body.append(wrap);
+      document.addEventListener('keydown', onKey);
+      const f = box.querySelector('.modal-body input, .modal-body select, .modal-body textarea') || box.querySelector('.modal-foot .btn.primary, .modal-foot .btn.danger');
+      if (f) f.focus();
+    });
+  }
+  const confirmDlg = (title, text, okLabel = 'Подтвердить', kind = 'primary') =>
+    modal(title, h('p', null, text), [{ label: 'Отмена', value: false }, { label: okLabel, kind, submit: true, value: true }]);
+  const promptDlg = (title, label, value = '') => {
+    const inp = h('input', { type: 'text', value });
+    return modal(title, h('label', { class: 'field' }, h('span', null, label), inp),
+      [{ label: 'Отмена', value: null }, { label: 'Сохранить', kind: 'primary', submit: true, getValue: () => inp.value }]);
+  };
+
+  // ---------- вход / первичная настройка ----------
+  async function boot() {
+    if (state.cleanup) { try { state.cleanup(); } catch {} state.cleanup = null; }
+    let st;
+    try { st = await api('GET', '/api/state'); } catch (e) {
+      root.replaceChildren(h('div', { class: 'boot' }, 'Хаб недоступен: ' + e.message));
+      setTimeout(boot, 3000);
+      return;
+    }
+    state.hubUrls = st.hub_urls || [];
+    if (st.setup_needed) return renderAuth('setup', st);
+    if (!st.user) return renderAuth('login', st);
+    state.user = st.user;
+    renderShell();
+    route();
+  }
+
+  function renderAuth(mode, st) {
+    const setup = mode === 'setup';
+    const err = h('div', { class: 'form-err' });
+    const user = h('input', { type: 'text', autocomplete: 'username', placeholder: 'Имя пользователя', required: true });
+    const pass = h('input', { type: 'password', autocomplete: setup ? 'new-password' : 'current-password', placeholder: 'Пароль', required: true });
+    const pass2 = setup ? h('input', { type: 'password', autocomplete: 'new-password', placeholder: 'Повторите пароль', required: true }) : null;
+    const btn = h('button', { class: 'btn primary wide', type: 'submit' }, setup ? 'Создать администратора' : 'Войти');
+    const form = h('form', {
+      class: 'auth-card',
+      onsubmit: async (e) => {
+        e.preventDefault();
+        err.textContent = '';
+        if (setup && pass.value !== pass2.value) { err.textContent = 'Пароли не совпадают'; return; }
+        btn.disabled = true;
+        try {
+          const r = await api('POST', setup ? '/api/setup' : '/api/login', { user: user.value, password: pass.value });
+          if (r && r.totp_required) return renderTOTP(r.ticket);
+          boot();
+        } catch (ex) { err.textContent = ex.message; } finally { btn.disabled = false; }
+      },
+    },
+      h('div', { class: 'brand big' }, logo(), h('span', null, 'RandDesk')),
+      h('p', { class: 'muted' }, setup ? 'Первый запуск: создайте учётную запись администратора.' : 'Вход в панель управления'),
+      setup && !st.can_setup ? h('div', { class: 'form-err' }, 'Первичная настройка доступна только на ПК с хабом — откройте там http://localhost:8420') : null,
+      user, pass, pass2, err, btn);
+    root.replaceChildren(h('div', { class: 'auth' }, form));
+    user.focus();
+  }
+
+  // второй шаг входа: код из приложения-аутентификатора или резервный код
+  function renderTOTP(ticket) {
+    const err = h('div', { class: 'form-err' });
+    const code = h('input', { type: 'text', autocomplete: 'one-time-code', inputmode: 'numeric', placeholder: '123 456', required: true, class: 'otp', maxlength: '12' });
+    const btn = h('button', { class: 'btn primary wide', type: 'submit' }, 'Подтвердить');
+    const form = h('form', {
+      class: 'auth-card',
+      onsubmit: async (e) => {
+        e.preventDefault();
+        err.textContent = '';
+        btn.disabled = true;
+        try {
+          await api('POST', '/api/login/totp', { ticket, code: code.value });
+          boot();
+        } catch (ex) {
+          err.textContent = ex.message;
+          code.select();
+          if (ex.status === 401 && /истёк/.test(ex.message)) setTimeout(boot, 1500);
+        } finally { btn.disabled = false; }
+      },
+    },
+      h('div', { class: 'brand big' }, logo(), h('span', null, 'RandDesk')),
+      h('p', { class: 'muted' }, 'Введите 6-значный код из приложения-аутентификатора.'),
+      code, err, btn,
+      h('p', { class: 'muted small' }, 'Нет доступа к телефону? Введите один из резервных кодов (вида ABCD-EFGH).'),
+      h('button', { class: 'btn ghost sm', type: 'button', onclick: boot }, '← Назад'));
+    root.replaceChildren(h('div', { class: 'auth' }, form));
+    code.focus();
+  }
+
+  async function logout() {
+    try { await api('POST', '/api/logout'); } catch {}
+    state.user = null;
+    location.hash = '#/';
+    boot();
+  }
+
+  // ---------- каркас и маршрутизация ----------
+  const NAV = [['#/', 'Устройства', 'devices'], ['#/exec', 'Массовое выполнение', 'run'], ['#/audit', 'Журнал', 'log'], ['#/settings', 'Настройки', 'settings']];
+
+  function renderShell() {
+    const side = h('aside', { class: 'side' },
+      h('div', { class: 'brand' }, logo(), h('span', null, 'RandDesk')),
+      h('nav', null, NAV.map(([href, label, ic]) => h('a', { href, 'data-nav': href, title: label }, icon(ic), h('span', null, label)))),
+      h('div', { class: 'side-foot' }, h('span', { class: 'muted small ell' }, state.user),
+        h('button', { class: 'btn ghost sm', onclick: logout, title: 'Выйти' }, icon('logout'), 'Выйти')));
+    root.replaceChildren(h('div', { class: 'app' }, side, h('main', { class: 'main', id: 'view' })));
+  }
+
+  function route() {
+    if (!state.user) return;
+    if (state.cleanup) { try { state.cleanup(); } catch {} state.cleanup = null; }
+    const view = document.getElementById('view');
+    if (!view) return;
+    const path = location.hash.slice(1) || '/';
+    const parts = path.split('/').filter(Boolean);
+    document.querySelectorAll('[data-nav]').forEach((a) => {
+      const n = a.getAttribute('data-nav').slice(2);
+      a.classList.toggle('active', n === '' ? !parts[0] || parts[0] === 'device' : parts[0] === n);
+    });
+    view.replaceChildren();
+    let c;
+    if (parts[0] === 'device' && parts[1]) c = pageDevice(view, decodeURIComponent(parts[1]), parts[2] || 'overview');
+    else if (parts[0] === 'exec') c = pageExec(view);
+    else if (parts[0] === 'audit') c = pageAudit(view);
+    else if (parts[0] === 'settings') c = pageSettings(view);
+    else c = pageDevices(view);
+    state.cleanup = c || null;
+    window.scrollTo(0, 0);
+  }
+  window.addEventListener('hashchange', route);
+
+  // ---------- общие компоненты ----------
+  const tile = (k, v, cls = '') => h('div', { class: 'tile ' + cls }, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v));
+  const meter = (label, p, text) => h('div', { class: 'meter' },
+    h('div', { class: 'meter-row' }, h('span', null, label), h('span', { class: 'muted' }, text)),
+    h('div', { class: 'bar ' + level(p) }, h('i', { style: { width: Math.max(0, Math.min(100, p)).toFixed(1) + '%' } })));
+  const cmdBlock = (text) => {
+    const code = h('code', { class: 'cmd' }, text);
+    return { el: h('div', { class: 'cmd-wrap' }, code, h('button', { class: 'btn sm', type: 'button', onclick: () => copyText(code.textContent) }, 'Копировать')), code };
+  };
+
+  async function wake(d) {
+    try {
+      const r = await api('POST', `/api/devices/${enc(d.id)}/wake`);
+      toast(`Magic-пакет отправлен на ${r.macs.join(', ')} (ретрансляторов: ${r.relays})`, 'ok');
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+
+  const KIND = { lan: 'локальная сеть', vpn: 'VPN', public: 'интернет' };
+
+  async function showAddDevice() {
+    let k;
+    try { k = await api('GET', '/api/enroll-key'); } catch (e) { toast(e.message, 'bad'); return; }
+    const addrs = (k.addrs && k.addrs.length) ? k.addrs : [{ url: location.origin, kind: 'lan' }];
+    const inst = cmdBlock(''), cons = cmdBlock('');
+    const warn = h('div', { class: 'form-err' });
+    const checks = addrs.map((a) => {
+      const cb = h('input', { type: 'checkbox', checked: true });
+      return { a, cb, el: h('label', { class: 'pick' }, cb, h('span', { class: 'mono small' }, a.url), h('span', { class: 'badge ' + a.kind }, KIND[a.kind] || a.kind)) };
+    });
+    const upd = () => {
+      const list = checks.filter((c) => c.cb.checked).map((c) => c.a.url);
+      const hub = list.join(',') || location.origin;
+      const fp = k.fingerprint ? ` -fp ${k.fingerprint}` : '';
+      inst.code.textContent = `.\\randdesk.exe agent install -hub ${hub} -key ${k.key}${fp}`;
+      cons.code.textContent = `.\\randdesk.exe agent -hub ${hub} -key ${k.key}${fp}`;
+      warn.textContent = list.length ? '' : 'Выберите хотя бы один адрес.';
+    };
+    checks.forEach((c) => c.cb.addEventListener('change', upd));
+    upd();
+    const hasPublic = addrs.some((a) => a.kind === 'public');
+    modal('Добавить ПК', [
+      h('ol', { class: 'steps' },
+        h('li', null, 'Скопируйте randdesk.exe на нужный ПК.'),
+        h('li', null, 'Отметьте адреса хаба. Агент пробует их по порядку: дома подключится по локальной сети, вне дома — через интернет.',
+          h('div', { class: 'pick-list col' }, checks.map((c) => c.el)), warn,
+          hasPublic ? null : h('p', { class: 'muted small' }, 'Внешнего адреса пока нет. Чтобы ПК подключался не только из локальной сети, включите «Доступ из интернета» в настройках.')),
+        h('li', null, 'В PowerShell от администратора установите агента службой (запускается вместе с Windows):', inst.el),
+        h('li', null, 'Или для проверки запустите агента в консоли, без установки:', cons.el)),
+      h('p', { class: 'muted small' }, 'Параметр -fp — отпечаток сертификата хаба: агент не подключится к подменённому хабу. Новые адреса хаба (например, после смены внешнего IP) агент получит сам. Ключ привязки можно сменить в настройках — уже привязанные ПК продолжат работать.'),
+    ]);
+  }
+
+  // ---------- страница: устройства ----------
+  function pageDevices(view) {
+    const tiles = h('div', { class: 'tiles' });
+    const grid = h('div', { class: 'dev-grid' });
+    view.append(
+      h('div', { class: 'page-head' }, h('h1', null, 'Устройства'),
+        h('div', { class: 'actions' }, h('button', { class: 'btn primary', onclick: showAddDevice }, '+ Добавить ПК'))),
+      tiles, grid);
+    let empty = null;
+    return poll(async () => {
+      const devs = await api('GET', '/api/devices');
+      const online = devs.filter((d) => d.online && d.stats);
+      const avgCpu = online.length ? online.reduce((a, d) => a + d.stats.cpu, 0) / online.length : null;
+      const mu = online.reduce((a, d) => a + d.stats.mem_used, 0), mt = online.reduce((a, d) => a + d.stats.mem_total, 0);
+      tiles.replaceChildren(
+        tile('Всего ПК', devs.length),
+        tile('В сети', devs.filter((d) => d.online).length, devs.some((d) => d.online) ? 'ok' : ''),
+        tile('Средняя загрузка CPU', avgCpu == null ? '—' : fmtPct(avgCpu)),
+        tile('Память (ПК в сети)', mt ? `${fmtBytes(mu)} / ${fmtBytes(mt)}` : '—'));
+      if (!devs.length) {
+        if (!empty) {
+          empty = h('div', { class: 'empty' }, h('h2', null, 'Пока нет ни одного ПК'),
+            h('p', null, 'Установите агента RandDesk на компьютер и привяжите его ключом из этого хаба.'),
+            h('button', { class: 'btn primary', onclick: showAddDevice }, 'Как добавить ПК'));
+          grid.replaceChildren(empty);
+        }
+        return;
+      }
+      empty = null;
+      grid.replaceChildren(...devs.map(deviceCard));
+    }, 3000);
+  }
+
+  function deviceCard(d) {
+    const st = d.stats;
+    const ip = primaryIP(d);
+    const disks = (st && st.disks) || [];
+    const sysDisk = disks.find((x) => /^C:/i.test(x.mount)) || disks[0];
+    const href = '#/device/' + enc(d.id);
+    return h('div', { class: 'dev-card' + (d.online ? '' : ' offline') },
+      h('div', { class: 'dev-top' }, h('span', { class: 'dot ' + (d.online ? 'on' : 'off') }),
+        h('a', { class: 'dev-name ell', href }, d.name), h('span', { class: 'muted small right ell' }, shortOS(d.info))),
+      h('div', { class: 'muted small ell' }, [d.info.hostname, ip].filter(Boolean).join(' · ') || '—'),
+      d.online && st
+        ? h('div', { class: 'meters' },
+          meter('CPU', st.cpu, fmtPct(st.cpu)),
+          meter('Память', pct(st.mem_used, st.mem_total), `${fmtBytes(st.mem_used)} / ${fmtBytes(st.mem_total)}`),
+          sysDisk ? meter('Диск ' + sysDisk.mount.replace(/\\$/, ''), pct(sysDisk.used, sysDisk.total), `${fmtBytes(sysDisk.used)} / ${fmtBytes(sysDisk.total)}`) : null,
+          h('div', { class: 'dev-net muted small' }, h('span', null, `↓ ${fmtRate(st.net_rx)}`), h('span', null, `↑ ${fmtRate(st.net_tx)}`),
+            h('span', { class: 'right' }, 'аптайм ' + fmtUptime(st.uptime))))
+        : h('div', { class: 'dev-offline muted small' }, d.online ? 'Получение данных…' : 'Не в сети · последний раз ' + fmtAgo(d.last_seen)),
+      h('div', { class: 'dev-actions' },
+        h('a', { class: 'btn sm', href }, 'Открыть'),
+        d.online ? h('a', { class: 'btn sm primary', href: href + '/desktop' }, icon('devices'), 'Рабочий стол') : null,
+        d.online ? h('a', { class: 'btn sm', href: href + '/terminal' }, icon('terminal'), 'Консоль') : null,
+        !d.online && hasMac(d) ? h('button', { class: 'btn sm', onclick: () => wake(d) }, icon('power'), 'Включить') : null));
+  }
+
+  // ---------- страница: устройство ----------
+  const TABS = [['overview', 'Обзор'], ['desktop', 'Рабочий стол'], ['terminal', 'Консоль'], ['processes', 'Процессы'], ['services', 'Службы'], ['run', 'Выполнить']];
+
+  function pageDevice(view, id, tab) {
+    if (!TABS.some((t) => t[0] === tab)) tab = 'overview';
+    const head = h('div', { class: 'page-head' });
+    const sub = h('div', { class: 'muted small', style: { margin: '-10px 0 16px' } });
+    const body = h('div');
+    view.append(h('a', { href: '#/', class: 'back small' }, '← Все устройства'), head, sub,
+      h('div', { class: 'tabs' }, TABS.map(([k, l]) => h('a', { href: `#/device/${enc(id)}/${k}`, class: k === tab ? 'active' : '' }, l))),
+      body);
+    let dev = null, tabCleanup = null, started = false, lastKey = '';
+
+    const power = async (action, label) => {
+      if (!await confirmDlg(label + '?', `${label}: «${dev.name}». Несохранённые данные на этом ПК могут быть потеряны.`, label, 'danger')) return;
+      try { await api('POST', rpc(id, 'power'), { action }); toast(`Команда «${label}» отправлена`, 'ok'); } catch (e) { toast(e.message, 'bad'); }
+    };
+    const rename = async () => {
+      const n = await promptDlg('Переименовать ПК', 'Название', dev.name);
+      if (!n || !n.trim()) return;
+      try { await api('POST', `/api/devices/${enc(id)}/rename`, { name: n.trim() }); dev.name = n.trim(); lastKey = ''; renderHead(); } catch (e) { toast(e.message, 'bad'); }
+    };
+    const remove = async () => {
+      if (!await confirmDlg('Удалить ПК?', `«${dev.name}» будет отвязан от хаба. Чтобы вернуть его, агента нужно привязать заново.`, 'Удалить', 'danger')) return;
+      try { await api('DELETE', `/api/devices/${enc(id)}`); toast('ПК удалён', 'ok'); location.hash = '#/'; } catch (e) { toast(e.message, 'bad'); }
+    };
+
+    function renderHead() {
+      const on = dev.online;
+      const key = [dev.name, on].join('|');
+      if (key !== lastKey) {
+        lastKey = key;
+        head.replaceChildren(
+          h('div', { class: 'dev-title' }, h('span', { class: 'dot ' + (on ? 'on' : 'off') }), h('h1', null, dev.name),
+            h('button', { class: 'icon-btn', title: 'Переименовать', onclick: rename }, '✎'),
+            h('span', { class: 'pill ' + (on ? 'ok' : '') }, on ? 'в сети' : 'не в сети')),
+          h('div', { class: 'actions' },
+            on ? [
+              h('button', { class: 'btn sm', onclick: () => power('reboot', 'Перезагрузить') }, 'Перезагрузить'),
+              h('button', { class: 'btn sm', onclick: () => power('shutdown', 'Выключить') }, icon('power'), 'Выключить'),
+              h('button', { class: 'btn sm', onclick: () => power('sleep', 'Перевести в сон') }, 'Сон'),
+              h('button', { class: 'btn sm ghost', onclick: async () => { try { await api('POST', rpc(id, 'power'), { action: 'cancel' }); toast('Выключение отменено', 'ok'); } catch (e) { toast(e.message, 'bad'); } } }, 'Отменить выкл.'),
+            ] : [
+              hasMac(dev) ? h('button', { class: 'btn sm primary', onclick: () => wake(dev) }, icon('power'), 'Включить (WoL)') : null,
+            ],
+            h('button', { class: 'btn sm danger-ghost', onclick: remove }, 'Удалить')));
+      }
+      sub.textContent = [shortOS(dev.info), dev.info.hostname, primaryIP(dev), on ? null : 'последний раз в сети ' + fmtAgo(dev.last_seen)].filter(Boolean).join(' · ');
+    }
+
+    const stop = poll(async () => {
+      try { dev = await api('GET', `/api/devices/${enc(id)}`); } catch (e) {
+        if (e.status === 404) { head.replaceChildren(h('h1', null, 'Устройство не найдено')); stopNow(); return; }
+        throw e;
+      }
+      renderHead();
+      if (!started) {
+        started = true;
+        const fn = { overview: tabOverview, desktop: tabDesktop, terminal: tabTerminal, processes: tabProcesses, services: tabServices, run: tabRun }[tab];
+        tabCleanup = fn(body, dev, () => dev);
+      }
+    }, 5000);
+    let stopped = false;
+    const stopNow = () => { if (!stopped) { stopped = true; stop(); } };
+    return () => { stopNow(); if (tabCleanup) tabCleanup(); };
+  }
+
+  const offlineNote = (dev) => h('div', { class: 'empty' }, h('h2', null, 'ПК не в сети'),
+    h('p', null, 'Эта функция доступна, когда агент подключён к хабу.'),
+    hasMac(dev) ? h('button', { class: 'btn primary', onclick: () => wake(dev) }, icon('power'), 'Включить по сети (WoL)') : null);
+
+  // --- обзор ---
+  function chartBox(title, legend) {
+    const val = h('span', { class: 'chart-val' });
+    const cv = h('canvas');
+    const el = h('div', { class: 'card' },
+      h('div', { class: 'chart-head' }, h('h3', null, title), val),
+      h('div', { class: 'chart-area' }, cv),
+      legend ? h('div', { class: 'legend' }, legend.map(([c, l]) => h('span', null, h('i', { style: { background: cssVar(c) } }), l))) : null);
+    return { el, draw(series, opts, label) { drawChart(cv, series, opts || {}); val.textContent = label; } };
+  }
+
+  function drawChart(cv, series, { max, win = 10 * 60e3, fmt } = {}) {
+    const dpr = window.devicePixelRatio || 1;
+    const w = cv.clientWidth, H = cv.clientHeight;
+    if (!w || !H) return;
+    if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(H * dpr); }
+    const ctx = cv.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, H);
+    let tMax = 0;
+    for (const s of series) if (s.data.length) tMax = Math.max(tMax, s.data[s.data.length - 1][0]);
+    const tMin = tMax - win;
+    let yMax = max;
+    if (!yMax) {
+      yMax = 1024;
+      for (const s of series) for (const [t, v] of s.data) if (t >= tMin && v > yMax) yMax = v;
+      yMax *= 1.2;
+    }
+    ctx.strokeStyle = cssVar('--grid');
+    ctx.lineWidth = 1;
+    ctx.fillStyle = cssVar('--muted');
+    ctx.font = '11px "Segoe UI", system-ui, sans-serif';
+    for (let i = 0; i < 4; i++) {
+      const y = Math.round((H - 4) * i / 4) + 0.5;
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+    }
+    ctx.fillText(fmt ? fmt(yMax) : Math.round(yMax) + '%', 4, 12);
+    if (!tMax) return;
+    for (const s of series) {
+      const pts = s.data.filter(([t]) => t >= tMin);
+      if (pts.length < 2) continue;
+      const X = (t) => ((t - tMin) / win) * w;
+      const Y = (v) => H - 2 - (Math.min(v, yMax) / yMax) * (H - 8);
+      const color = cssVar(s.color);
+      ctx.beginPath();
+      pts.forEach(([t, v], i) => (i ? ctx.lineTo(X(t), Y(v)) : ctx.moveTo(X(t), Y(v))));
+      ctx.strokeStyle = color; ctx.lineWidth = 1.7; ctx.lineJoin = 'round'; ctx.stroke();
+      ctx.lineTo(X(pts[pts.length - 1][0]), H); ctx.lineTo(X(pts[0][0]), H); ctx.closePath();
+      ctx.globalAlpha = 0.13; ctx.fillStyle = color; ctx.fill(); ctx.globalAlpha = 1;
+    }
+  }
+
+  function tabOverview(body, dev0) {
+    const id = dev0.id;
+    const info = h('div', { class: 'info-grid' });
+    const cpuC = chartBox('Загрузка CPU · 10 мин');
+    const memC = chartBox('Память · 10 мин');
+    const netC = chartBox('Сеть · 10 мин', [['--ok', 'приём'], ['--warn', 'передача']]);
+    const disks = h('div');
+    const nics = h('div', { class: 'kv' });
+    body.append(info, h('div', { class: 'charts' }, cpuC.el, memC.el, netC.el),
+      h('div', { class: 'two-col' }, h('div', { class: 'card' }, h('h3', null, 'Диски'), disks), h('div', { class: 'card' }, h('h3', null, 'Сетевые адаптеры'), nics)));
+    let points = [], since = 0;
+    const cell = (k, v) => h('div', null, h('div', { class: 'k' }, k), h('div', { class: 'v', title: String(v) }, v));
+
+    function render(d) {
+      const i = d.info, st = d.stats;
+      info.replaceChildren(
+        cell('Операционная система', [shortOS(i), i.platform_version].filter(Boolean).join(' ') || '—'),
+        cell('Процессор', i.cpu_model || '—'),
+        cell('Ядра / потоки', i.cpu_cores ? `${i.cpu_cores} / ${i.cpu_threads}` : '—'),
+        cell('Оперативная память', fmtBytes(i.mem_total)),
+        cell('Время работы', st ? fmtUptime(st.uptime) : '—'),
+        cell('Процессов', st ? st.procs : '—'),
+        cell('Агент', `v${i.agent_version || '?'}${i.agent_user ? ' · ' + i.agent_user : ''}`),
+        cell('Последний IP (для хаба)', d.last_ip || '—'));
+      disks.replaceChildren(...(st && st.disks && st.disks.length ? st.disks.map((x) => h('div', { class: 'disk' },
+        meter(`${x.mount} ${x.fs ? '(' + x.fs + ')' : ''}`, pct(x.used, x.total), `${fmtBytes(x.used)} из ${fmtBytes(x.total)} · свободно ${fmtBytes(x.total - x.used)}`)))
+        : [h('div', { class: 'muted' }, d.online ? 'Нет данных' : 'ПК не в сети')]));
+      nics.replaceChildren(...(i.nics || []).flatMap((n) => [h('span', { class: 'k ell' }, n.name), h('span', { class: 'mono small' }, [n.mac, ...(n.ips || [])].join('  '))]));
+    }
+
+    return poll(async () => {
+      const r = await api('GET', `/api/devices/${enc(id)}/history?since=${since}`);
+      if (r.points.length) {
+        points = points.concat(r.points);
+        if (points.length > 1800) points = points.slice(-1800);
+        since = points[points.length - 1].t;
+      }
+      render(r.device);
+      const last = points[points.length - 1];
+      cpuC.draw([{ data: points.map((p) => [p.t, p.cpu]), color: '--accent' }], { max: 100 }, last ? fmtPct(last.cpu) : '—');
+      memC.draw([{ data: points.map((p) => [p.t, p.mem]), color: '--accent-2' }], { max: 100 }, last ? fmtPct(last.mem) : '—');
+      netC.draw([{ data: points.map((p) => [p.t, p.rx]), color: '--ok' }, { data: points.map((p) => [p.t, p.tx]), color: '--warn' }],
+        { fmt: fmtRate }, last ? `↓ ${fmtRate(last.rx)}  ↑ ${fmtRate(last.tx)}` : '—');
+    }, 2000);
+  }
+
+  // --- консоль ---
+  function tabTerminal(body, dev) {
+    if (!dev.online) { body.append(offlineNote(dev)); return null; }
+    const shellSel = h('select', null, h('option', { value: 'powershell' }, 'Windows PowerShell'), h('option', { value: 'cmd' }, 'Командная строка (cmd)'), h('option', { value: 'pwsh' }, 'PowerShell 7 (pwsh)'));
+    const status = h('span', { class: 'muted small' });
+    const box = h('div', { class: 'term-box' });
+    body.append(h('div', { class: 'toolbar' }, h('label', { class: 'inline' }, 'Оболочка', shellSel),
+      h('button', { class: 'btn sm', onclick: () => connect() }, 'Новый сеанс'), status), box);
+    let term = null, fit = null, ws = null, ro = null;
+    const te = new TextEncoder();
+
+    function disconnect() {
+      if (ro) ro.disconnect();
+      if (ws) { ws.onclose = null; ws.onmessage = null; try { ws.close(); } catch {} }
+      if (term) term.dispose();
+      box.replaceChildren();
+      term = fit = ws = ro = null;
+    }
+    function connect() {
+      disconnect();
+      if (typeof Terminal === 'undefined') { box.append(h('div', { class: 'muted' }, 'Не удалось загрузить xterm.js')); return; }
+      term = new Terminal({
+        fontFamily: '"Cascadia Mono", Consolas, "Courier New", monospace', fontSize: 14, cursorBlink: true, scrollback: 5000,
+        theme: { background: '#0b0e13', foreground: '#d6dde6', cursor: '#4f8cff', selectionBackground: '#264f78' },
+      });
+      fit = new FitAddon.FitAddon();
+      term.loadAddon(fit);
+      term.open(box);
+      try { fit.fit(); } catch {}
+      const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+      const sock = new WebSocket(`${scheme}://${location.host}/api/devices/${enc(dev.id)}/terminal?shell=${shellSel.value}&cols=${term.cols}&rows=${term.rows}`);
+      sock.binaryType = 'arraybuffer';
+      ws = sock;
+      const t = term;
+      status.textContent = 'Подключение…';
+      sock.onopen = () => { status.textContent = 'Подключено'; t.focus(); };
+      sock.onmessage = (e) => {
+        if (typeof e.data === 'string') {
+          try { const m = JSON.parse(e.data); if (m.type === 'error') t.write(`\r\n\x1b[31m${m.message}\x1b[0m\r\n`); } catch {}
+        } else t.write(new Uint8Array(e.data));
+      };
+      sock.onclose = () => { status.textContent = 'Сеанс завершён'; t.write('\r\n\x1b[90m[сеанс завершён — нажмите «Новый сеанс»]\x1b[0m\r\n'); };
+      t.onData((d) => { if (sock.readyState === 1) sock.send(te.encode(d)); });
+      t.onResize(({ cols, rows }) => { if (sock.readyState === 1) sock.send(JSON.stringify({ type: 'resize', cols, rows })); });
+      ro = new ResizeObserver(() => { try { fit.fit(); } catch {} });
+      ro.observe(box);
+    }
+    connect();
+    return disconnect;
+  }
+
+  // --- удалённый рабочий стол ---
+  const KEY_COMBOS = {
+    win: [['MetaLeft', 91]], alttab: [['AltLeft', 18], ['Tab', 9]], ctrlshiftesc: [['ControlLeft', 17], ['ShiftLeft', 16], ['Escape', 27]],
+    altf4: [['AltLeft', 18], ['F4', 115]], winr: [['MetaLeft', 91], ['KeyR', 82]], wind: [['MetaLeft', 91], ['KeyD', 68]],
+    winl: [['MetaLeft', 91], ['KeyL', 76]], prtsc: [['PrintScreen', 44]],
+  };
+  const pref = (k, d) => { try { return localStorage.getItem('rd.' + k) || d; } catch { return d; } };
+  const setPref = (k, v) => { try { localStorage.setItem('rd.' + k, v); } catch {} };
+
+  function tabDesktop(body, dev) {
+    if (!dev.online) { body.append(offlineNote(dev)); return null; }
+    const opt = (v, l) => h('option', { value: v }, l);
+    const monSel = h('select', { title: 'Монитор' }, opt('-1', 'Основной монитор'));
+    const qSel = h('select', { title: 'Качество изображения' }, opt('85', 'Качество: высокое'), opt('70', 'Качество: среднее'), opt('50', 'Качество: низкое'), opt('30', 'Качество: минимум'));
+    const scaleSel = h('select', { title: 'Разрешение передачи' }, opt('100', 'Разрешение 100%'), opt('50', 'Разрешение 50%'));
+    const fpsSel = h('select', { title: 'Частота кадров' }, opt('60', '60 к/с'), opt('30', '30 к/с'), opt('15', '15 к/с'));
+    qSel.value = pref('q', '70'); scaleSel.value = pref('scale', '100'); fpsSel.value = pref('fps', '60');
+    const viewOnly = h('input', { type: 'checkbox' });
+    const fitBox = h('input', { type: 'checkbox', checked: pref('fit', '1') === '1' });
+    const keysSel = h('select', { title: 'Отправить сочетание клавиш' }, opt('', 'Сочетания клавиш…'), opt('win', 'Win'), opt('alttab', 'Alt+Tab'),
+      opt('ctrlshiftesc', 'Ctrl+Shift+Esc'), opt('altf4', 'Alt+F4'), opt('winr', 'Win+R'), opt('wind', 'Win+D'), opt('prtsc', 'PrintScreen'));
+    const stats = h('span', { class: 'muted small mono rd-stats' }, '');
+    const canvas = h('canvas', { class: 'rd-canvas', tabindex: '0', width: '1280', height: '720' });
+    const overlay = h('div', { class: 'rd-overlay' }, 'Подключение…');
+    const stage = h('div', { class: 'rd-stage' + (fitBox.checked ? ' fit' : '') }, canvas, overlay);
+    const fsBtn = h('button', { class: 'btn sm', title: 'Во весь экран (Win и Alt+Tab тоже уходят на удалённый ПК)' }, 'Во весь экран');
+    const pasteBtn = h('button', { class: 'btn sm', title: 'Набрать текст на удалённом ПК' }, 'Вставить текст');
+    const reBtn = h('button', { class: 'btn sm ghost' }, 'Переподключить');
+    body.append(
+      h('div', { class: 'toolbar' }, monSel, qSel, scaleSel, fpsSel, keysSel, pasteBtn, fsBtn, reBtn),
+      h('div', { class: 'toolbar' }, h('label', { class: 'inline' }, fitBox, 'вписать в окно'), h('label', { class: 'inline' }, viewOnly, 'только просмотр'), stats),
+      stage);
+
+    const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
+    let ws = null, chain = Promise.resolve(), frames = 0, bytes = 0, rtt = null, capKind = '', desk = '';
+    const pressed = new Map();
+    const send = (o) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
+    const sendCfg = (extra) => send({ t: 'cfg', q: +qSel.value, fps: +fpsSel.value, scale: +scaleSel.value, ...extra });
+
+    function onText(sock, m) {
+      if (m.type === 'pong') rtt = performance.now() - m.ts;
+      else if (m.type === 'info') {
+        capKind = m.capture; desk = m.desktop || '';
+        const cur = String(m.monitor);
+        monSel.replaceChildren(...(m.monitors || []).map((x) => opt(String(x.index), x.name + (x.primary ? ' · основной' : ''))));
+        monSel.value = cur;
+      } else if (m.type === 'error') { overlay.textContent = m.message; overlay.hidden = false; }
+    }
+
+    function connect() {
+      disconnect();
+      overlay.textContent = 'Подключение…'; overlay.hidden = false;
+      const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+      const sock = new WebSocket(`${scheme}://${location.host}/api/devices/${enc(dev.id)}/desktop`);
+      sock.binaryType = 'arraybuffer';
+      ws = sock;
+      chain = Promise.resolve();
+      sock.onopen = () => { sendCfg(); };
+      sock.onmessage = (e) => {
+        if (typeof e.data === 'string') { try { onText(sock, JSON.parse(e.data)); } catch {} return; }
+        const buf = e.data, dv = new DataView(buf);
+        if (dv.getUint8(0) !== 1) return;
+        bytes += buf.byteLength;
+        const id = dv.getUint32(1, true), W = dv.getUint16(5, true), H = dv.getUint16(7, true), n = dv.getUint16(9, true);
+        const tiles = [];
+        let o = 11;
+        for (let i = 0; i < n; i++) {
+          const x = dv.getUint16(o, true), y = dv.getUint16(o + 2, true), len = dv.getUint32(o + 8, true);
+          o += 12;
+          tiles.push(createImageBitmap(new Blob([new Uint8Array(buf, o, len)], { type: 'image/jpeg' })).then((bm) => ({ bm, x, y })));
+          o += len;
+        }
+        const decoded = Promise.all(tiles); // декодирование параллельно, отрисовка строго по порядку
+        chain = chain.then(() => decoded).then((list) => {
+          if (sock !== ws) { list.forEach((t) => t.bm.close()); return; }
+          if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
+          for (const t of list) { ctx.drawImage(t.bm, t.x, t.y); t.bm.close(); }
+          frames++;
+          overlay.hidden = true;
+          if (sock.readyState === 1) sock.send(JSON.stringify({ t: 'ack', id }));
+        }).catch((err) => { console.warn(err); if (sock.readyState === 1) sock.send(JSON.stringify({ t: 'ack', id })); });
+      };
+      sock.onclose = () => {
+        if (sock !== ws) return;
+        overlay.textContent = 'Соединение закрыто — нажмите «Переподключить»';
+        overlay.hidden = false;
+      };
+    }
+    function disconnect() {
+      if (ws) { const s = ws; ws = null; s.onclose = null; try { s.close(); } catch {} }
+      pressed.clear();
+    }
+
+    // статистика и замер задержки
+    const timer = setInterval(() => {
+      send({ t: 'ping', ts: performance.now() });
+      if (ws && ws.readyState === 1) {
+        stats.textContent = [rtt == null ? 'RTT —' : `RTT ${rtt.toFixed(rtt < 10 ? 1 : 0)} мс`, `${frames} к/с`, fmtRate(bytes),
+          canvas.width + '×' + canvas.height, capKind, desk && desk.toLowerCase() !== 'default' ? 'рабочий стол: ' + desk : ''].filter(Boolean).join(' · ');
+      }
+      frames = 0; bytes = 0;
+    }, 1000);
+
+    // ---- ввод ----
+    const pos = (e) => {
+      const r = canvas.getBoundingClientRect();
+      return { x: Math.round(((e.clientX - r.left) * canvas.width) / r.width), y: Math.round(((e.clientY - r.top) * canvas.height) / r.height) };
+    };
+    const active = () => !viewOnly.checked && ws && ws.readyState === 1;
+    canvas.addEventListener('pointermove', (e) => { if (active()) send({ t: 'mm', ...pos(e) }); });
+    canvas.addEventListener('pointerdown', (e) => { canvas.focus(); try { canvas.setPointerCapture(e.pointerId); } catch {} });
+    canvas.addEventListener('mousedown', (e) => { e.preventDefault(); canvas.focus(); if (active()) send({ t: 'md', b: e.button, ...pos(e) }); });
+    canvas.addEventListener('mouseup', (e) => { e.preventDefault(); if (active()) send({ t: 'mu', b: e.button, ...pos(e) }); });
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      if (!active()) return;
+      const k = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? 800 : 1;
+      send({ t: 'wh', dy: Math.round(-e.deltaY * k * 1.2), dx: Math.round(e.deltaX * k * 1.2) });
+    }, { passive: false });
+    canvas.addEventListener('keydown', (e) => {
+      if (!active()) return;
+      e.preventDefault();
+      pressed.set(e.code, e.keyCode);
+      send({ t: 'kd', c: e.code, k: e.keyCode });
+    });
+    canvas.addEventListener('keyup', (e) => {
+      if (!active()) return;
+      e.preventDefault();
+      pressed.delete(e.code);
+      send({ t: 'ku', c: e.code, k: e.keyCode });
+    });
+    canvas.addEventListener('blur', () => { if (pressed.size) { send({ t: 'rel' }); pressed.clear(); } });
+
+    // ---- панель ----
+    qSel.addEventListener('change', () => { setPref('q', qSel.value); sendCfg(); });
+    fpsSel.addEventListener('change', () => { setPref('fps', fpsSel.value); sendCfg(); });
+    scaleSel.addEventListener('change', () => { setPref('scale', scaleSel.value); sendCfg(); });
+    monSel.addEventListener('change', () => sendCfg({ mon: +monSel.value }));
+    fitBox.addEventListener('change', () => { setPref('fit', fitBox.checked ? '1' : '0'); stage.classList.toggle('fit', fitBox.checked); });
+    keysSel.addEventListener('change', () => {
+      const c = KEY_COMBOS[keysSel.value];
+      keysSel.value = '';
+      if (!c || !active()) return;
+      c.forEach(([code, k]) => send({ t: 'kd', c: code, k }));
+      [...c].reverse().forEach(([code, k]) => send({ t: 'ku', c: code, k }));
+      canvas.focus();
+    });
+    pasteBtn.addEventListener('click', async () => {
+      const ta = h('textarea', { rows: 6, placeholder: 'Текст будет набран на удалённом ПК в активном окне' });
+      const text = await modal('Вставить текст', ta, [{ label: 'Отмена', value: null }, { label: 'Набрать', kind: 'primary', submit: true, getValue: () => ta.value }]);
+      if (text) { send({ t: 'text', s: text }); canvas.focus(); }
+    });
+    fsBtn.addEventListener('click', async () => {
+      try {
+        await stage.requestFullscreen();
+        if (navigator.keyboard && navigator.keyboard.lock) await navigator.keyboard.lock().catch(() => {});
+        canvas.focus();
+      } catch (e) { toast('Полноэкранный режим недоступен: ' + e.message, 'bad'); }
+    });
+    const onFs = () => { if (!document.fullscreenElement && navigator.keyboard && navigator.keyboard.unlock) navigator.keyboard.unlock(); };
+    document.addEventListener('fullscreenchange', onFs);
+    reBtn.addEventListener('click', connect);
+
+    connect();
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('fullscreenchange', onFs);
+      if (document.fullscreenElement === stage) document.exitFullscreen().catch(() => {});
+      disconnect();
+    };
+  }
+
+  // --- таблица с сортировкой (процессы, службы) ---
+  function sortableTable(cols, defSort) {
+    let sort = defSort;
+    const ths = cols.map((c) => h('th', {
+      class: 'sortable' + (c.num ? ' num' : ''),
+      onclick: () => { sort = { key: c.key, dir: sort.key === c.key ? -sort.dir : (c.num ? -1 : 1) }; onSort(); },
+    }, c.label));
+    const tbody = h('tbody');
+    const table = h('table', { class: 'tbl' }, h('thead', null, h('tr', null, ths, h('th', null, ''))), tbody);
+    let onSort = () => {};
+    return {
+      table, tbody,
+      set onSort(fn) { onSort = fn; },
+      sortRows(rows) {
+        ths.forEach((th, i) => { const on = cols[i].key === sort.key; th.classList.toggle('sorted', on); th.setAttribute('data-dir', on ? (sort.dir > 0 ? '▲' : '▼') : ''); });
+        return rows.sort((a, b) => {
+          const x = a[sort.key], y = b[sort.key];
+          return (typeof x === 'string' ? x.localeCompare(y || '', 'ru', { sensitivity: 'base' }) : (x || 0) - (y || 0)) * sort.dir;
+        });
+      },
+    };
+  }
+
+  // --- процессы ---
+  function tabProcesses(body, dev) {
+    if (!dev.online) { body.append(offlineNote(dev)); return null; }
+    const q = h('input', { type: 'search', placeholder: 'Поиск: имя, PID, пользователь' });
+    const auto = h('input', { type: 'checkbox', checked: true });
+    const info = h('span', { class: 'muted small' });
+    const t = sortableTable([
+      { key: 'name', label: 'Имя' }, { key: 'pid', label: 'PID', num: true }, { key: 'user', label: 'Пользователь' },
+      { key: 'cpu', label: 'ЦП', num: true }, { key: 'mem', label: 'Память', num: true }, { key: 'threads', label: 'Потоки', num: true },
+    ], { key: 'cpu', dir: -1 });
+    body.append(h('div', { class: 'toolbar' }, q, h('label', { class: 'inline' }, auto, 'автообновление'),
+      h('button', { class: 'btn sm', onclick: () => load() }, 'Обновить'), info), h('div', { class: 'table-wrap' }, t.table));
+    let data = [], hover = false;
+    t.tbody.addEventListener('mouseenter', () => { hover = true; });
+    t.tbody.addEventListener('mouseleave', () => { hover = false; });
+
+    function render() {
+      const f = q.value.trim().toLowerCase();
+      const rows = t.sortRows(data.filter((p) => !f || p.name.toLowerCase().includes(f) || String(p.pid) === f || (p.user || '').toLowerCase().includes(f)));
+      info.textContent = `Процессов: ${data.length}` + (f ? ` · найдено: ${rows.length}` : '') + (rows.length > 400 ? ' · показаны первые 400' : '');
+      t.tbody.replaceChildren(...rows.slice(0, 400).map((p) => h('tr', null,
+        h('td', { class: 'ell', title: p.name }, p.name), h('td', { class: 'num' }, p.pid), h('td', { class: 'ell' }, p.user || '—'),
+        h('td', { class: 'num' }, p.cpu >= 0.05 ? p.cpu.toFixed(1) + '%' : '0'), h('td', { class: 'num' }, p.mem ? fmtBytes(p.mem) : '—'),
+        h('td', { class: 'num' }, p.threads),
+        h('td', { class: 'row-act' },
+          h('button', { class: 'btn xs danger-ghost', onclick: () => kill(p, false) }, 'Завершить'),
+          h('button', { class: 'btn xs ghost', title: 'Завершить вместе с дочерними процессами', onclick: () => kill(p, true) }, 'Дерево')))));
+    }
+    async function kill(p, tree) {
+      if (!await confirmDlg('Завершить процесс?', `${p.name} (PID ${p.pid})${tree ? ' и все его дочерние процессы будут завершены' : ' будет завершён'} без сохранения данных.`, 'Завершить', 'danger')) return;
+      try { await api('POST', rpc(dev.id, 'kill'), { pid: p.pid, tree }); toast(`${p.name} завершён`, 'ok'); load(true); } catch (e) { toast(e.message, 'bad'); }
+    }
+    async function load(force) {
+      data = await api('POST', rpc(dev.id, 'procs'));
+      if (force || !hover) render();
+    }
+    q.addEventListener('input', render);
+    t.onSort = render;
+    return poll(async () => { if (auto.checked || !data.length) await load(); }, 3000);
+  }
+
+  // --- службы ---
+  const SVC_STATE = { running: 'работает', stopped: 'остановлена', starting: 'запускается', stopping: 'останавливается', paused: 'приостановлена', pausing: 'приостанавливается', continuing: 'возобновляется' };
+  function tabServices(body, dev) {
+    if (!dev.online) { body.append(offlineNote(dev)); return null; }
+    const q = h('input', { type: 'search', placeholder: 'Поиск по имени или описанию' });
+    const filter = h('select', null, h('option', { value: '' }, 'Все'), h('option', { value: 'running' }, 'Работают'), h('option', { value: 'stopped' }, 'Остановлены'));
+    const info = h('span', { class: 'muted small' });
+    const t = sortableTable([
+      { key: 'name', label: 'Имя' }, { key: 'display', label: 'Описание' }, { key: 'state', label: 'Состояние' }, { key: 'pid', label: 'PID', num: true },
+    ], { key: 'display', dir: 1 });
+    body.append(h('div', { class: 'toolbar' }, q, filter, h('button', { class: 'btn sm', onclick: () => load() }, 'Обновить'), info),
+      h('div', { class: 'table-wrap' }, t.table));
+    let data = [];
+    const busy = new Set();
+
+    function render() {
+      const f = q.value.trim().toLowerCase(), fs = filter.value;
+      const rows = t.sortRows(data.filter((s) => (!fs || s.state === fs) && (!f || s.name.toLowerCase().includes(f) || s.display.toLowerCase().includes(f))));
+      info.textContent = `Служб: ${data.length} · работают: ${data.filter((s) => s.state === 'running').length}` + (f || fs ? ` · показано: ${rows.length}` : '');
+      t.tbody.replaceChildren(...rows.map((s) => {
+        const b = busy.has(s.name);
+        const act = (a, label, cls) => h('button', { class: 'btn xs ' + cls, disabled: b, onclick: () => control(s, a, label) }, label);
+        return h('tr', null,
+          h('td', { class: 'ell mono small', title: s.name }, s.name), h('td', { class: 'ell', title: s.display }, s.display),
+          h('td', null, h('span', { class: 'state ' + s.state }, b ? 'выполняется…' : SVC_STATE[s.state] || s.state)),
+          h('td', { class: 'num' }, s.pid || ''),
+          h('td', { class: 'row-act' }, s.state === 'stopped' ? act('start', 'Запустить', 'ghost')
+            : s.state === 'running' ? [act('restart', 'Перезапустить', 'ghost'), act('stop', 'Остановить', 'danger-ghost')] : null));
+      }));
+    }
+    async function control(s, action, label) {
+      if (action !== 'start' && !await confirmDlg(label + ' службу?', `${s.display} (${s.name})`, label, 'danger')) return;
+      busy.add(s.name); render();
+      try { await api('POST', rpc(dev.id, 'service'), { name: s.name, action }); toast(`${s.display}: готово`, 'ok'); } catch (e) { toast(e.message, 'bad'); }
+      busy.delete(s.name);
+      load();
+    }
+    async function load() { data = await api('POST', rpc(dev.id, 'services')); render(); }
+    q.addEventListener('input', render);
+    filter.addEventListener('change', render);
+    t.onSort = render;
+    load().catch((e) => toast(e.message, 'bad'));
+    return null;
+  }
+
+  // --- выполнение команд ---
+  function resultCard(title, command) {
+    const meta = h('span', { class: 'muted small right' }, 'выполняется…');
+    const out = h('pre', { class: 'out muted' }, '…');
+    const el = h('div', { class: 'card result' }, h('div', { class: 'result-head' }, h('b', null, title), h('code', { class: 'ell' }, command), meta), out);
+    return {
+      el,
+      set(r) {
+        out.classList.remove('muted');
+        out.textContent = r.output && r.output.trim() ? r.output.replace(/\s+$/, '') : '(нет вывода)';
+        meta.textContent = `код ${r.exit_code} · ${(r.duration_ms / 1000).toFixed(1)} с` + (r.timed_out ? ' · превышено время' : '') + (r.truncated ? ' · вывод обрезан' : '');
+        el.classList.add(r.exit_code === 0 && !r.timed_out ? 'ok' : 'bad');
+      },
+      fail(m) { out.textContent = m; meta.textContent = 'ошибка'; el.classList.add('bad'); },
+    };
+  }
+
+  function runForm(onRun, extra) {
+    const shell = h('select', null, h('option', { value: 'powershell' }, 'PowerShell'), h('option', { value: 'cmd' }, 'cmd'));
+    const timeout = h('input', { type: 'number', min: 1, max: 600, value: 60, class: 'num-in', title: 'Тайм-аут, с' });
+    const cmd = h('textarea', { rows: 4, spellcheck: 'false', placeholder: 'Например: Get-Process | Sort-Object CPU -Descending | Select-Object -First 10\nCtrl+Enter — выполнить' });
+    const btn = h('button', { class: 'btn primary', type: 'button' }, 'Выполнить');
+    const go = async () => {
+      const c = cmd.value.trim();
+      if (!c || btn.disabled) return;
+      btn.disabled = true;
+      try { await onRun({ shell: shell.value, command: c, timeout: Math.min(600, Math.max(1, +timeout.value || 60)) }); } finally { btn.disabled = false; }
+    };
+    btn.addEventListener('click', go);
+    cmd.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); go(); } });
+    return h('div', { class: 'run-form' }, extra || null, cmd,
+      h('div', { class: 'row' }, h('label', { class: 'inline' }, 'Оболочка', shell), h('label', { class: 'inline' }, 'Тайм-аут, с', timeout), btn));
+  }
+
+  function tabRun(body, dev) {
+    if (!dev.online) { body.append(offlineNote(dev)); return null; }
+    const results = h('div', { class: 'results' });
+    body.append(runForm(async (req) => {
+      const card = resultCard(dev.name, req.command);
+      results.prepend(card.el);
+      try { card.set(await api('POST', rpc(dev.id, 'exec'), req)); } catch (e) { card.fail(e.message); }
+    }), results);
+    return null;
+  }
+
+  // ---------- страница: массовое выполнение ----------
+  function pageExec(view) {
+    const picks = h('div', { class: 'pick-list' });
+    const results = h('div', { class: 'results' });
+    const selected = new Set();
+    let devices = [];
+    const allBox = h('input', { type: 'checkbox' });
+    allBox.addEventListener('change', () => {
+      devices.filter((d) => d.online).forEach((d) => (allBox.checked ? selected.add(d.id) : selected.delete(d.id)));
+      renderPicks();
+    });
+    function renderPicks() {
+      if (!devices.length) { picks.replaceChildren(h('span', { class: 'muted' }, 'Нет привязанных ПК')); return; }
+      picks.replaceChildren(...devices.map((d) => {
+        const cb = h('input', { type: 'checkbox', checked: selected.has(d.id), disabled: !d.online });
+        cb.addEventListener('change', () => { cb.checked ? selected.add(d.id) : selected.delete(d.id); });
+        return h('label', { class: 'pick' + (d.online ? '' : ' disabled') }, cb, h('span', { class: 'dot ' + (d.online ? 'on' : 'off') }), d.name);
+      }));
+    }
+    view.append(h('div', { class: 'page-head' }, h('h1', null, 'Массовое выполнение')),
+      h('p', { class: 'muted', style: { marginTop: '-8px' } }, 'Одна команда сразу на нескольких ПК. Результаты приходят по мере выполнения.'),
+      h('div', { class: 'toolbar' }, h('label', { class: 'inline' }, allBox, 'выбрать все в сети')),
+      picks,
+      runForm(async (req) => {
+        const targets = devices.filter((d) => selected.has(d.id) && d.online);
+        if (!targets.length) { toast('Выберите хотя бы один ПК в сети', 'bad'); return; }
+        results.replaceChildren();
+        await Promise.all(targets.map(async (d) => {
+          const card = resultCard(d.name, req.command);
+          results.append(card.el);
+          try { card.set(await api('POST', rpc(d.id, 'exec'), req)); } catch (e) { card.fail(e.message); }
+        }));
+      }),
+      results);
+    return poll(async () => {
+      devices = await api('GET', '/api/devices');
+      for (const id of [...selected]) if (!devices.some((d) => d.id === id && d.online)) selected.delete(id);
+      renderPicks();
+    }, 5000);
+  }
+
+  // ---------- страница: журнал ----------
+  const ACTIONS = {
+    login: 'Вход', login_failed: 'Неудачный вход', setup: 'Первичная настройка', password_changed: 'Смена пароля',
+    enroll_key_rotated: 'Смена ключа привязки', device_enrolled: 'Привязан ПК', enroll_failed: 'Ошибка привязки ПК',
+    device_deleted: 'Удалён ПК', rename: 'Переименование', kill: 'Завершение процесса', service: 'Управление службой',
+    exec: 'Выполнение команды', power: 'Питание', wake: 'Wake-on-LAN', terminal_open: 'Открыта консоль', terminal_close: 'Закрыта консоль',
+    desktop_open: 'Подключение к рабочему столу', desktop_close: 'Отключение от рабочего стола',
+  };
+  function pageAudit(view) {
+    const tbody = h('tbody');
+    view.append(h('div', { class: 'page-head' }, h('h1', null, 'Журнал действий'),
+      h('div', { class: 'actions' }, h('button', { class: 'btn sm', onclick: () => load() }, 'Обновить'))),
+      h('div', { class: 'table-wrap' }, h('table', { class: 'tbl' },
+        h('thead', null, h('tr', null, ['Время', 'Пользователь', 'IP', 'Устройство', 'Действие', 'Подробности'].map((x) => h('th', null, x)))), tbody)));
+    async function load() {
+      const rows = await api('GET', '/api/audit');
+      tbody.replaceChildren(...(rows.length ? rows.map((e) => h('tr', null,
+        h('td', { style: { whiteSpace: 'nowrap' } }, fmtTime(e.time)), h('td', null, e.user || '—'), h('td', { class: 'mono small' }, e.ip),
+        h('td', null, e.device || '—'), h('td', null, ACTIONS[e.action] || e.action),
+        h('td', { class: 'ell mono small', title: e.detail }, e.detail || ''))) : [h('tr', null, h('td', { colspan: 6, class: 'muted' }, 'Записей пока нет'))]));
+    }
+    load().catch((e) => toast(e.message, 'bad'));
+    return null;
+  }
+
+  // ---------- страница: настройки ----------
+  // поле кода 2FA для подтверждения важных действий
+  const codeField = (label = 'Код из приложения (2FA)') => {
+    const inp = h('input', { type: 'text', autocomplete: 'one-time-code', inputmode: 'numeric', placeholder: '123 456' });
+    return { inp, el: h('label', { class: 'field' }, h('span', null, label), inp) };
+  };
+
+  function showRecovery(codes) {
+    const text = codes.join('\n');
+    return modal('Резервные коды', [
+      h('p', null, 'Сохраните эти коды в надёжном месте (менеджер паролей, бумага). Каждый код одноразовый и нужен, если телефон потерян. Больше они показаны не будут.'),
+      h('pre', { class: 'recovery' }, text),
+      h('button', { class: 'btn sm', type: 'button', onclick: () => copyText(text) }, 'Копировать'),
+    ], [{ label: 'Я сохранил коды', kind: 'primary', submit: true, value: true }]);
+  }
+
+  async function enable2FA(done) {
+    let r;
+    try { r = await api('POST', '/api/2fa/setup'); } catch (e) { toast(e.message, 'bad'); return; }
+    const code = codeField('Код из приложения');
+    const secret = h('code', { class: 'mono secret' }, r.secret.replace(/(.{4})/g, '$1 ').trim());
+    let codes = null;
+    for (;;) {
+      const v = await modal('Включить двухфакторную аутентификацию', [
+        h('ol', { class: 'steps' },
+          h('li', null, 'Установите на телефон приложение-аутентификатор: Google Authenticator, Microsoft Authenticator, Яндекс Ключ, Aegis и т. п.'),
+          h('li', null, 'Отсканируйте QR-код или введите ключ вручную:',
+            h('div', { class: 'qr-box' },
+              r.qr ? h('img', { src: r.qr, alt: 'QR-код для приложения-аутентификатора', width: '200', height: '200' }) : null,
+              h('div', null, secret, h('div', { style: { marginTop: '8px' } }, h('button', { class: 'btn sm', type: 'button', onclick: () => copyText(r.secret) }, 'Копировать ключ'))))),
+          h('li', null, 'Введите 6-значный код, который покажет приложение:', code.el)),
+      ], [{ label: 'Отмена', value: null }, { label: 'Включить', kind: 'primary', submit: true, value: 'go' }]);
+      if (v !== 'go') break;
+      try {
+        codes = (await api('POST', '/api/2fa/enable', { code: code.inp.value })).recovery;
+        break;
+      } catch (e) {
+        toast(e.message, 'bad');
+        code.inp.value = '';
+        if (e.status !== 400 || /истекло/.test(e.message)) break;
+      }
+    }
+    if (codes) {
+      toast('Двухфакторная аутентификация включена', 'ok');
+      await showRecovery(codes);
+    }
+    done();
+  }
+
+  function confirmWithPassword(title, text, okLabel, kind, need2fa) {
+    const pass = h('input', { type: 'password', autocomplete: 'current-password' });
+    const code = codeField();
+    return modal(title, [h('p', { style: { marginBottom: '12px' } }, text),
+      h('label', { class: 'field' }, h('span', null, 'Ваш пароль'), pass), need2fa ? code.el : null],
+      [{ label: 'Отмена', value: null }, { label: okLabel, kind, submit: true, getValue: () => ({ password: pass.value, code: code.inp.value }) }]);
+  }
+
+  function pageSettings(view) {
+    const keyCode = h('code', null, '••••-••••-••••-••••');
+    let key = '', shown = false;
+    const showBtn = h('button', { class: 'btn sm', onclick: () => { shown = !shown; keyCode.textContent = shown ? key : mask(key); showBtn.textContent = shown ? 'Скрыть' : 'Показать'; } }, 'Показать');
+    const mask = (k) => k.replace(/[A-Z0-9](?=.*-)/g, '•').replace(/-[A-Z0-9]{4}$/, '-••••');
+    const loadKey = async () => { const r = await api('GET', '/api/enroll-key'); key = r.key; keyCode.textContent = shown ? key : mask(key); };
+
+    const pOld = h('input', { type: 'password', autocomplete: 'current-password' });
+    const pNew = h('input', { type: 'password', autocomplete: 'new-password' });
+    const pNew2 = h('input', { type: 'password', autocomplete: 'new-password' });
+    const pErr = h('div', { class: 'form-err' });
+
+    const tfaCard = h('div', { class: 'card' }, h('h3', null, 'Двухфакторная аутентификация (2FA)'));
+    const usersCard = h('div', { class: 'card' }, h('h3', null, 'Пользователи'));
+    const netCard = h('div', { class: 'card' }, h('h3', null, 'Доступ из интернета'));
+    const isMe = (n) => n.toLowerCase() === (state.user || '').toLowerCase();
+    let me = null;
+
+    const loadMe = async () => {
+      me = await api('GET', '/api/me');
+      const actions = me.totp
+        ? [h('button', { class: 'btn sm', onclick: async () => {
+            const v = await confirmWithPassword('Новые резервные коды', 'Старые резервные коды перестанут работать.', 'Создать', 'primary', true);
+            if (!v) return;
+            try { const r = await api('POST', '/api/2fa/recovery', v); await showRecovery(r.recovery); loadMe(); } catch (e) { toast(e.message, 'bad'); }
+          } }, 'Новые резервные коды'),
+          h('button', { class: 'btn sm danger-ghost', onclick: async () => {
+            const v = await confirmWithPassword('Выключить 2FA?', 'Для входа снова будет достаточно только пароля.', 'Выключить', 'danger', true);
+            if (!v) return;
+            try { await api('POST', '/api/2fa/disable', v); toast('Двухфакторная аутентификация выключена', 'ok'); reloadAll(); } catch (e) { toast(e.message, 'bad'); }
+          } }, 'Выключить')]
+        : [h('button', { class: 'btn sm primary', onclick: () => enable2FA(reloadAll) }, 'Включить 2FA')];
+      tfaCard.replaceChildren(h('h3', null, 'Двухфакторная аутентификация (2FA)'),
+        h('p', { class: 'muted' }, 'Кроме пароля при входе понадобится код из приложения на телефоне. Обязательно включите, если хаб доступен из интернета.'),
+        h('div', { class: 'kv', style: { marginBottom: '12px' } },
+          h('span', { class: 'k' }, 'Состояние'), h('span', { class: me.totp ? 'ok-text' : 'bad-text' }, me.totp ? 'включена' : 'выключена'),
+          me.totp ? h('span', { class: 'k' }, 'Резервных кодов') : null, me.totp ? h('span', null, String(me.recovery_left)) : null),
+        h('div', { class: 'key-box' }, actions));
+    };
+
+    const addUser = async () => {
+      const name = h('input', { type: 'text', autocomplete: 'off' });
+      const p1 = h('input', { type: 'password', autocomplete: 'new-password' });
+      const p2 = h('input', { type: 'password', autocomplete: 'new-password' });
+      const cur = h('input', { type: 'password', autocomplete: 'current-password' });
+      const code = codeField('Ваш код 2FA');
+      const v = await modal('Новый пользователь', [
+        h('label', { class: 'field' }, h('span', null, 'Имя пользователя'), name),
+        h('label', { class: 'field' }, h('span', null, 'Пароль (от 8 символов)'), p1),
+        h('label', { class: 'field' }, h('span', null, 'Повторите пароль'), p2),
+        h('label', { class: 'field' }, h('span', null, 'Ваш текущий пароль (подтверждение)'), cur),
+        me && me.totp ? code.el : null,
+        h('p', { class: 'muted small' }, 'Новый пользователь сможет сам включить 2FA в настройках после первого входа.'),
+      ], [{ label: 'Отмена', value: null }, { label: 'Создать', kind: 'primary', submit: true, value: true }]);
+      if (!v) return;
+      if (p1.value !== p2.value) { toast('Пароли не совпадают', 'bad'); return; }
+      try {
+        await api('POST', '/api/users', { name: name.value, password: p1.value, current_password: cur.value, code: code.inp.value });
+        toast('Пользователь создан', 'ok');
+        loadUsers();
+      } catch (e) { toast(e.message, 'bad'); }
+    };
+
+    const loadUsers = async () => {
+      const users = await api('GET', '/api/users');
+      usersCard.replaceChildren(h('h3', null, 'Пользователи'),
+        h('p', { class: 'muted' }, 'У каждого пользователя свой логин, пароль и своя 2FA. Все пользователи имеют полный доступ.'),
+        h('div', { class: 'user-list' }, users.map((u) => h('div', { class: 'user-row' },
+          h('span', { class: 'ell' }, u.name, isMe(u.name) ? h('span', { class: 'muted small' }, ' (вы)') : null),
+          h('span', { class: 'badge ' + (u.totp ? 'lan' : '') }, u.totp ? '2FA' : 'без 2FA'),
+          h('span', { class: 'muted small' }, u.created && !u.created.startsWith('0001') ? fmtTime(u.created) : ''),
+          isMe(u.name) ? h('span') : h('button', { class: 'btn sm danger-ghost', onclick: async () => {
+            if (!await confirmDlg('Удалить пользователя?', `Пользователь «${u.name}» потеряет доступ к хабу.`, 'Удалить', 'danger')) return;
+            try { await api('DELETE', '/api/users/' + enc(u.name)); toast('Пользователь удалён', 'ok'); loadUsers(); } catch (e) { toast(e.message, 'bad'); }
+          } }, 'Удалить')))),
+        h('button', { class: 'btn sm primary', style: { marginTop: '12px' }, onclick: addUser }, '+ Добавить пользователя'));
+    };
+
+    let netTimer = null;
+    const loadNet = async () => {
+      clearTimeout(netTimer);
+      const r = await api('GET', '/api/internet');
+      const st = r.status;
+      const upnp = h('input', { type: 'checkbox', checked: st.upnp });
+      const host = h('input', { type: 'text', value: st.public_host || '', placeholder: 'например myhome.duckdns.org или 203.0.113.5:8420' });
+      const save = async () => {
+        try {
+          await api('POST', '/api/internet', { upnp: upnp.checked, public_host: host.value });
+          toast('Сохранено', 'ok');
+          netTimer = setTimeout(() => loadNet().catch(() => {}), upnp.checked ? 5000 : 500);
+        } catch (e) { toast(e.message, 'bad'); }
+      };
+      let stLine;
+      if (!st.upnp) stLine = h('span', { class: 'muted' }, 'выключен');
+      else if (st.active && st.cgnat) stLine = h('span', { class: 'bad-text' }, `порт проброшен, но внешний адрес роутера ${st.external_ip} «серый» (CGNAT): из интернета хаб недоступен. Подключите VPN (Tailscale, ZeroTier) или закажите у провайдера «белый» IP.`);
+      else if (st.active) stLine = h('span', { class: 'ok-text' }, `порт ${st.port} проброшен на роутере ${st.gateway}, внешний адрес ${st.external_ip || '?'}`);
+      else if (st.error) stLine = h('span', { class: 'bad-text' }, st.error);
+      else {
+        stLine = h('span', { class: 'muted' }, 'настройка…');
+        netTimer = setTimeout(() => loadNet().catch(() => {}), 3000);
+      }
+      netCard.replaceChildren(h('h3', null, 'Доступ из интернета'),
+        h('p', { class: 'muted' }, 'Чтобы ПК подключались к хабу не только из локальной сети. Через интернет соединение всегда шифруется (HTTPS), а агенты проверяют отпечаток сертификата хаба.'),
+        !r.totp && (st.upnp || st.public_host) ? h('div', { class: 'warn-box' }, 'Хаб доступен из интернета, а 2FA у вас выключена — включите её выше.') : '',
+        h('label', { class: 'pick', style: { marginBottom: '12px' } }, upnp, h('span', null, 'Автоматически пробросить порт на роутере (UPnP)')),
+        h('label', { class: 'field' }, h('span', null, 'Свой внешний адрес: домен DDNS или IP (необязательно; нужен, если IP меняется или порт проброшен на роутере вручную)'), host),
+        h('button', { class: 'btn primary sm', onclick: save }, 'Сохранить'),
+        h('div', { class: 'kv', style: { marginTop: '14px' } },
+          h('span', { class: 'k' }, 'UPnP'), stLine,
+          h('span', { class: 'k' }, 'Адреса хаба'), h('div', { class: 'addr-list' }, r.addrs.map((a) =>
+            h('div', null, h('span', { class: 'mono small' }, a.url), ' ', h('span', { class: 'badge ' + a.kind }, KIND[a.kind] || a.kind)))),
+          r.fingerprint ? h('span', { class: 'k' }, 'Отпечаток сертификата') : null,
+          r.fingerprint ? h('span', { class: 'mono small break' }, r.fingerprint) : null),
+        h('p', { class: 'muted small', style: { marginTop: '12px' } }, 'Агенты, установленные с параметром -fp, получат новые адреса сами при следующем подключении. При открытии https:// в браузере появится предупреждение о самоподписанном сертификате: это ожидаемо, продолжите.'));
+    };
+
+    const reloadAll = () => {
+      loadMe().catch((e) => toast(e.message, 'bad'));
+      loadUsers().catch((e) => toast(e.message, 'bad'));
+      loadNet().catch((e) => toast(e.message, 'bad'));
+    };
+
+    view.append(h('div', { class: 'page-head' }, h('h1', null, 'Настройки')),
+      h('div', { class: 'settings' },
+        tfaCard,
+        h('form', { class: 'card', onsubmit: async (e) => {
+          e.preventDefault(); pErr.textContent = '';
+          if (pNew.value !== pNew2.value) { pErr.textContent = 'Новые пароли не совпадают'; return; }
+          try { await api('POST', '/api/password', { old: pOld.value, new: pNew.value }); toast('Пароль изменён', 'ok'); e.target.reset(); } catch (ex) { pErr.textContent = ex.message; }
+        } }, h('h3', null, 'Смена пароля'),
+          h('label', { class: 'field' }, h('span', null, 'Текущий пароль'), pOld),
+          h('label', { class: 'field' }, h('span', null, 'Новый пароль (от 8 символов)'), pNew),
+          h('label', { class: 'field' }, h('span', null, 'Повторите новый пароль'), pNew2),
+          pErr, h('button', { class: 'btn primary', type: 'submit' }, 'Сменить пароль')),
+        usersCard,
+        netCard,
+        h('div', { class: 'card' }, h('h3', null, 'Ключ привязки ПК'),
+          h('p', { class: 'muted' }, 'По этому ключу агенты привязываются к вашему хабу. После смены ключа уже привязанные ПК продолжат работать, а новые нужно будет привязывать новым ключом.'),
+          h('div', { class: 'key-box' }, keyCode, showBtn,
+            h('button', { class: 'btn sm', onclick: () => copyText(key) }, 'Копировать'),
+            h('button', { class: 'btn sm', onclick: showAddDevice }, 'Инструкция'),
+            h('button', { class: 'btn sm danger-ghost', onclick: async () => {
+              if (!await confirmDlg('Сменить ключ?', 'Старый ключ перестанет работать для привязки новых ПК.', 'Сменить', 'danger')) return;
+              try { const r = await api('POST', '/api/enroll-key/rotate'); key = r.key; keyCode.textContent = shown ? key : mask(key); toast('Ключ изменён', 'ok'); } catch (e) { toast(e.message, 'bad'); }
+            } }, 'Сменить ключ')))));
+    loadKey().catch((e) => toast(e.message, 'bad'));
+    reloadAll();
+    return () => clearTimeout(netTimer);
+  }
+
+  boot();
+})();
