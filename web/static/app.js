@@ -1,6 +1,21 @@
 'use strict';
 (() => {
   const root = document.getElementById('root');
+
+  // ---------- тема: тёмная по умолчанию, выбор запоминается ----------
+  const THEME_KEY = 'randdesk-theme';
+  const getTheme = () => document.documentElement.dataset.theme || 'dark';
+  function setTheme(t, animate) {
+    const el = document.documentElement;
+    if (animate) {
+      el.classList.add('theme-anim');
+      setTimeout(() => el.classList.remove('theme-anim'), 450);
+    }
+    el.dataset.theme = t;
+    try { localStorage.setItem(THEME_KEY, t); } catch {}
+    document.querySelectorAll('.theme-btn').forEach(updateThemeBtn);
+  }
+  try { setTheme(localStorage.getItem(THEME_KEY) === 'light' ? 'light' : 'dark'); } catch { setTheme('dark'); }
   const state = { user: null, hubUrls: [], cleanup: null };
 
   // ---------- DOM-утилиты ----------
@@ -31,6 +46,8 @@
     settings: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
     logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
     power: '<path d="M18.36 6.64a9 9 0 1 1-12.73 0M12 2v10"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>',
+    moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
     terminal: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/>',
   };
   function icon(name) {
@@ -44,9 +61,24 @@
     const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     s.setAttribute('viewBox', '0 0 32 32');
     s.setAttribute('class', 'logo');
-    s.innerHTML = '<rect width="32" height="32" rx="8" fill="#4f8cff"/><rect x="7" y="9" width="18" height="12" rx="2" fill="none" stroke="#fff" stroke-width="2.4"/><path d="M12 25h8" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>';
+    const id = 'lg' + Math.random().toString(36).slice(2, 8);
+    s.innerHTML = `<defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5b93ff"/><stop offset=".55" stop-color="#8b6cff"/><stop offset="1" stop-color="#c06cf0"/></linearGradient></defs>`
+      + `<rect width="32" height="32" rx="9" fill="url(#${id})"/><rect x="7" y="9" width="18" height="12" rx="2.5" fill="none" stroke="#fff" stroke-width="2.4"/><path d="M12 25h8" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/><circle cx="24.5" cy="8.5" r="3.2" fill="#3fd07a" stroke="#fff" stroke-width="1.5"/>`;
     return s;
   }
+
+  function updateThemeBtn(b) {
+    const dark = getTheme() === 'dark';
+    b.replaceChildren(icon(dark ? 'sun' : 'moon'));
+    b.title = dark ? 'Светлая тема' : 'Тёмная тема';
+    b.setAttribute('aria-label', b.title);
+  }
+  function themeButton() {
+    const b = h('button', { class: 'btn ghost sm theme-btn', type: 'button', onclick: () => setTheme(getTheme() === 'dark' ? 'light' : 'dark', true) });
+    updateThemeBtn(b);
+    return b;
+  }
+  const themeFloat = () => h('div', { class: 'theme-float' }, themeButton());
 
   // ---------- форматирование ----------
   const fmtBytes = (b) => {
@@ -137,7 +169,15 @@
   function modal(title, content, actions) {
     actions = actions || [{ label: 'Закрыть', value: null }];
     return new Promise((resolve) => {
-      const close = (v) => { wrap.remove(); document.removeEventListener('keydown', onKey); resolve(v); };
+      let closed = false;
+      const close = (v) => {
+        if (closed) return;
+        closed = true;
+        document.removeEventListener('keydown', onKey);
+        wrap.classList.add('closing');
+        setTimeout(() => wrap.remove(), 180);
+        resolve(v);
+      };
       const onKey = (e) => { if (e.key === 'Escape') close(null); };
       const submitA = actions.find((a) => a.submit);
       const box = h('form', {
@@ -238,7 +278,7 @@
         roleCard('member', 'Обычный ПК', 'Подключается к главному ПК. Управлять другими ПК — только с разрешения администратора.')),
       user, pass, pass2, hint, err, btn);
     upd();
-    root.replaceChildren(h('div', { class: 'auth' }, form));
+    root.replaceChildren(h('div', { class: 'auth' }, themeFloat(), form));
     user.focus();
   }
 
@@ -253,7 +293,7 @@
       try { await api('POST', '/api/node/connect', { address: addr.value }); toast('Подключено', 'ok'); } catch (ex) { err.textContent = ex.message; } finally { btn.disabled = false; }
     } }, h('p', { class: 'muted small' }, 'Главный ПК в другой сети (через интернет)? Введите его внешний адрес — он есть в настройках главного ПК:'),
       h('div', { class: 'row' }, addr, btn));
-    root.replaceChildren(h('div', { class: 'auth' }, h('div', { class: 'auth-card' },
+    root.replaceChildren(h('div', { class: 'auth' }, themeFloat(), h('div', { class: 'auth-card' },
       h('div', { class: 'brand big' }, logo(), h('span', null, 'RandDesk')),
       h('div', { class: 'spinner' }), status, err,
       h('p', { class: 'muted small' }, 'Убедитесь, что главный ПК включён и на нём RandDesk настроен с тем же логином и паролем. ПК в одной сети (или в Radmin VPN) найдут друг друга сами.'),
@@ -309,7 +349,7 @@
       h('p', { class: 'muted' }, setup ? 'Первый запуск: создайте учётную запись администратора.' : 'Вход в панель управления'),
       setup && !st.can_setup ? h('div', { class: 'form-err' }, 'Первичная настройка доступна только на ПК с хабом — откройте там http://localhost:8420') : null,
       user, pass, pass2, err, btn);
-    root.replaceChildren(h('div', { class: 'auth' }, form));
+    root.replaceChildren(h('div', { class: 'auth' }, themeFloat(), form));
     user.focus();
   }
 
@@ -339,7 +379,7 @@
       code, err, btn,
       h('p', { class: 'muted small' }, 'Нет доступа к телефону? Введите один из резервных кодов (вида ABCD-EFGH).'),
       h('button', { class: 'btn ghost sm', type: 'button', onclick: boot }, '← Назад'));
-    root.replaceChildren(h('div', { class: 'auth' }, form));
+    root.replaceChildren(h('div', { class: 'auth' }, themeFloat(), form));
     code.focus();
   }
 
@@ -359,8 +399,8 @@
       h('div', { class: 'brand' }, logo(), h('span', null, 'RandDesk')),
       h('nav', null, (state.device ? NAV_DEVICE : NAV).map(([href, label, ic]) => h('a', { href, 'data-nav': href, title: label }, icon(ic), h('span', null, label)))),
       state.device
-        ? h('div', { class: 'side-foot' }, h('span', { class: 'muted small ell', title: 'Управление — с разрешения администратора' }, 'Этот ПК: ' + state.device))
-        : h('div', { class: 'side-foot' }, h('span', { class: 'muted small ell' }, state.user),
+        ? h('div', { class: 'side-foot' }, h('span', { class: 'muted small ell', title: 'Управление — с разрешения администратора' }, 'Этот ПК: ' + state.device), themeButton())
+        : h('div', { class: 'side-foot' }, h('span', { class: 'muted small ell' }, state.user), themeButton(),
           h('button', { class: 'btn ghost sm', onclick: logout, title: 'Выйти' }, icon('logout'), 'Выйти')));
     root.replaceChildren(h('div', { class: 'app' }, side, h('main', { class: 'main', id: 'view' })));
   }
@@ -377,6 +417,9 @@
       a.classList.toggle('active', n === '' ? !parts[0] || parts[0] === 'device' : parts[0] === n);
     });
     view.replaceChildren();
+    view.classList.remove('page-enter');
+    void view.offsetWidth; // перезапуск анимации появления страницы
+    view.classList.add('page-enter');
     let c;
     if (parts[0] === 'device' && parts[1]) c = pageDevice(view, decodeURIComponent(parts[1]), parts[2] || 'overview');
     else if (parts[0] === 'exec') c = pageExec(view);
@@ -465,7 +508,9 @@
         state.device ? null : h('div', { class: 'actions' }, h('button', { class: 'btn primary', onclick: showAddDevice }, '+ Добавить ПК'))),
       state.device ? h('p', { class: 'muted', style: { marginTop: '-8px' } }, 'ПК, которыми администратор разрешил управлять с этого ПК.') : '',
       tiles, grid);
-    let empty = null;
+    let empty = null, firstGrid = true;
+    tiles.classList.add('stagger');
+    setTimeout(() => tiles.classList.remove('stagger'), 1000);
     return poll(async () => {
       const devs = await api('GET', '/api/devices');
       const online = devs.filter((d) => d.online && d.stats);
@@ -489,7 +534,14 @@
         return;
       }
       empty = null;
-      grid.replaceChildren(...devs.map(deviceCard));
+      const cards = devs.map(deviceCard);
+      if (firstGrid) { // карточки появляются по очереди только при открытии страницы
+        cards.forEach((c, i) => c.style.setProperty('--i', i));
+        grid.classList.add('stagger');
+        setTimeout(() => grid.classList.remove('stagger'), 1200);
+        firstGrid = false;
+      }
+      grid.replaceChildren(...cards);
     }, 3000);
   }
 
@@ -642,11 +694,23 @@
       const X = (t) => ((t - tMin) / win) * w;
       const Y = (v) => H - 2 - (Math.min(v, yMax) / yMax) * (H - 8);
       const color = cssVar(s.color);
-      ctx.beginPath();
-      pts.forEach(([t, v], i) => (i ? ctx.lineTo(X(t), Y(v)) : ctx.moveTo(X(t), Y(v))));
-      ctx.strokeStyle = color; ctx.lineWidth = 1.7; ctx.lineJoin = 'round'; ctx.stroke();
-      ctx.lineTo(X(pts[pts.length - 1][0]), H); ctx.lineTo(X(pts[0][0]), H); ctx.closePath();
-      ctx.globalAlpha = 0.13; ctx.fillStyle = color; ctx.fill(); ctx.globalAlpha = 1;
+      // плавная линия (сглаживание через середины отрезков) и градиентная заливка под ней
+      const path = new Path2D();
+      pts.forEach(([t, v], i) => {
+        const x = X(t), y = Y(v);
+        if (!i) { path.moveTo(x, y); return; }
+        const [pt, pv] = pts[i - 1];
+        const px = X(pt), py = Y(pv);
+        path.quadraticCurveTo(px, py, (px + x) / 2, (py + y) / 2);
+        if (i === pts.length - 1) path.lineTo(x, y);
+      });
+      const area = new Path2D(path);
+      area.lineTo(X(pts[pts.length - 1][0]), H); area.lineTo(X(pts[0][0]), H); area.closePath();
+      const grad = ctx.createLinearGradient(0, 0, 0, H);
+      grad.addColorStop(0, color + '55'); grad.addColorStop(1, color + '00');
+      ctx.fillStyle = grad; ctx.fill(area);
+      ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      ctx.shadowColor = color + '88'; ctx.shadowBlur = 8; ctx.stroke(path); ctx.shadowBlur = 0;
     }
   }
 
