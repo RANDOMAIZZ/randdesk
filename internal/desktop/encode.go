@@ -96,8 +96,82 @@ func copyRects(dst, src *image.RGBA, rs []rect) {
 
 var bufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
 
+// refineQuality — качество, с которым досылаются области, когда картинка перестала меняться.
+const refineQuality = 92
+
+// encodeStrip — высота куска для кодирования: крупные области режутся на полосы,
+// чтобы JPEG кодировался на всех ядрах (кратно 16 — без швов при субдискретизации цвета).
+const encodeStrip = 64
+
+func splitRects(rs []rect) []rect {
+	out := make([]rect, 0, len(rs))
+	for _, r := range rs {
+		for y := r.y; y < r.y+r.h; y += encodeStrip {
+			out = append(out, rect{r.x, y, r.w, min(encodeStrip, r.y+r.h-y)})
+		}
+	}
+	return out
+}
+
+// dirtyMap — плитки, отправленные с пониженным качеством и ещё не обновлённые в высоком.
+type dirtyMap struct {
+	cols, rows, w, h int
+	t                []bool
+	n                int
+}
+
+func newDirtyMap(w, h int) *dirtyMap {
+	c, r := (w+tileSize-1)/tileSize, (h+tileSize-1)/tileSize
+	return &dirtyMap{cols: c, rows: r, w: w, h: h, t: make([]bool, c*r)}
+}
+
+func (d *dirtyMap) set(rs []rect, v bool) {
+	for _, r := range rs {
+		for ty := r.y / tileSize; ty*tileSize < r.y+r.h && ty < d.rows; ty++ {
+			for tx := r.x / tileSize; tx*tileSize < r.x+r.w && tx < d.cols; tx++ {
+				i := ty*d.cols + tx
+				if d.t[i] != v {
+					d.t[i] = v
+					if v {
+						d.n++
+					} else {
+						d.n--
+					}
+				}
+			}
+		}
+	}
+}
+
+func (d *dirtyMap) mark(rs []rect)  { d.set(rs, true) }
+func (d *dirtyMap) clear(rs []rect) { d.set(rs, false) }
+func (d *dirtyMap) any() bool       { return d.n > 0 }
+
+// take возвращает отмеченные плитки (склеенные по строкам) и снимает отметки.
+func (d *dirtyMap) take() []rect {
+	var out []rect
+	for ty := 0; ty < d.rows; ty++ {
+		run := -1
+		for tx := 0; tx <= d.cols; tx++ {
+			on := tx < d.cols && d.t[ty*d.cols+tx]
+			if on && run < 0 {
+				run = tx
+			}
+			if !on && run >= 0 {
+				x, y := run*tileSize, ty*tileSize
+				out = append(out, rect{x, y, min(tx*tileSize, d.w) - x, min(tileSize, d.h-y)})
+				run = -1
+			}
+		}
+	}
+	clear(d.t)
+	d.n = 0
+	return out
+}
+
 // encodeFrame кодирует области в JPEG параллельно и собирает одно бинарное сообщение.
 func encodeFrame(img *image.RGBA, rs []rect, quality int, id uint32) []byte {
+	rs = splitRects(rs)
 	parts := make([]*bytes.Buffer, len(rs))
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, runtime.NumCPU())

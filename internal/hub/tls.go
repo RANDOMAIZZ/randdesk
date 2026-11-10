@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -193,6 +194,44 @@ func addrKind(ip net.IP) string {
 	default:
 		return "public"
 	}
+}
+
+// isZeroTierIface — сетевой адаптер ZeroTier («ZeroTier One [сеть]» на Windows, zt* на Linux).
+func isZeroTierIface(name string) bool {
+	n := strings.ToLower(name)
+	return strings.Contains(n, "zerotier") || (strings.HasPrefix(n, "zt") && len(n) > 4)
+}
+
+// routeOf — тип связи с ПК по его адресу: прямая локальная сеть, VPN, ZeroTier или интернет.
+func routeOf(ip net.IP) string {
+	if ip == nil {
+		return "internet"
+	}
+	if ip.IsLoopback() {
+		return "lan"
+	}
+	ifs, _ := net.Interfaces()
+	for _, ifc := range ifs {
+		addrs, _ := ifc.Addrs()
+		for _, a := range addrs {
+			if ipn, ok := a.(*net.IPNet); ok && ipn.Contains(ip) {
+				if isZeroTierIface(ifc.Name) {
+					return "zt"
+				}
+				if addrKind(ip) == "vpn" {
+					return "vpn"
+				}
+				return "lan"
+			}
+		}
+	}
+	switch addrKind(ip) { // за роутером, но не в наших подсетях
+	case "lan":
+		return "lan"
+	case "vpn":
+		return "vpn"
+	}
+	return "internet"
 }
 
 // plainGuard пропускает незашифрованный HTTP только из разрешённых сетей,

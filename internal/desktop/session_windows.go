@@ -15,7 +15,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const maxInflight = 2 // кадров «в пути» без подтверждения — ограничивает задержку буферизации
+const maxInflight = 3 // кадров «в пути» без подтверждения — ограничивает задержку буферизации
 
 var errReconfig = errors.New("смена настроек")
 
@@ -255,11 +255,36 @@ func (s *session) stream(c capturer, cfg config, desk *deskSwitcher) error {
 	s.forceFull.Store(true)
 
 	var (
-		id        uint32
-		pending   bool
-		lastSend  time.Time
-		lastCheck = time.Now()
+		id         uint32
+		pending    bool
+		lastSend   time.Time
+		lastCheck  = time.Now()
+		lastChange time.Time
+		encDone    chan struct{} // кодирование предыдущего кадра (идёт параллельно с захватом)
+		sendFailed atomic.Bool
 	)
+	soft := newDirtyMap(cur.Rect.Dx(), cur.Rect.Dy()) // области, отправленные с пониженным качеством
+	waitEnc := func() bool {
+		if encDone != nil {
+			<-encDone
+			encDone = nil
+		}
+		return !sendFailed.Load()
+	}
+	// encodeAsync кодирует области из prev и отправляет кадр, не задерживая захват следующего.
+	// prev не меняется, пока кодирование не закончится (см. waitEnc перед copyRects).
+	encodeAsync := func(rs []rect, q int, id uint32) {
+		done := make(chan struct{})
+		encDone = done
+		s.inflight.Add(1)
+		go func() {
+			defer close(done)
+			if err := s.sendBinary(encodeFrame(prev, rs, q, id)); err != nil {
+				sendFailed.Store(true)
+			}
+		}()
+	}
+	defer waitEnc()
 	for {
 		select {
 		case <-s.done:
@@ -290,6 +315,16 @@ func (s *session) stream(c capturer, cfg config, desk *deskSwitcher) error {
 			}
 		}
 		if !pending && !force {
+			// картинка замерла — досылаем размытые при движении области в высоком качестве
+			if soft.any() && time.Since(lastChange) > 300*time.Millisecond && s.inflight.Load() < maxInflight {
+				if !waitEnc() {
+					s.stop()
+					return nil
+				}
+				id++
+				encodeAsync(soft.take(), refineQuality, id)
+				lastSend = time.Now()
+			}
 			continue
 		}
 		if s.inflight.Load() >= maxInflight {
@@ -318,15 +353,19 @@ func (s *session) stream(c capturer, cfg config, desk *deskSwitcher) error {
 		if len(rs) == 0 {
 			continue
 		}
-		id++
-		msg := encodeFrame(cur, rs, cfg.quality, id)
-		copyRects(prev, cur, rs)
-		s.inflight.Add(1)
-		if err := s.sendBinary(msg); err != nil {
+		if !waitEnc() {
 			s.stop()
 			return nil
 		}
-		lastSend = time.Now()
+		copyRects(prev, cur, rs)
+		if cfg.quality < refineQuality {
+			soft.mark(rs)
+		} else {
+			soft.clear(rs)
+		}
+		id++
+		encodeAsync(rs, cfg.quality, id)
+		lastSend, lastChange = time.Now(), time.Now()
 	}
 }
 

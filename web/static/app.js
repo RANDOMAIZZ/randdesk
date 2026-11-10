@@ -545,6 +545,18 @@
     }, 3000);
   }
 
+  // тип связи с ПК: прямая локальная сеть (быстро) или через интернет
+  const ROUTES = {
+    lan: ['локальная сеть', 'lan', 'Прямое подключение по локальной сети — максимальная скорость'],
+    vpn: ['VPN', 'vpn', 'Подключение через VPN'],
+    zt: ['через интернет', 'zt', 'Подключение через интернет (ZeroTier)'],
+    internet: ['через интернет', 'zt', 'Подключение через интернет'],
+  };
+  const routeBadge = (d) => {
+    const r = d.online && ROUTES[d.route];
+    return r ? h('span', { class: 'badge route ' + r[1], title: r[2] }, r[0]) : null;
+  };
+
   // значок «ввод отключён» на карточке ПК
   function lockBadge(d) {
     const l = d.lock || {};
@@ -561,7 +573,7 @@
     return h('div', { class: 'dev-card' + (d.online ? '' : ' offline') },
       h('div', { class: 'dev-top' }, h('span', { class: 'dot ' + (d.online ? 'on' : 'off') }),
         h('a', { class: 'dev-name ell', href }, d.name), d.self ? h('span', { class: 'pill' }, 'главный') : null,
-        lockBadge(d), h('span', { class: 'muted small right ell' }, shortOS(d.info))),
+        lockBadge(d), routeBadge(d), h('span', { class: 'muted small right ell' }, shortOS(d.info))),
       h('div', { class: 'muted small ell' }, [d.info.hostname, ip].filter(Boolean).join(' · ') || '—'),
       d.online && st
         ? h('div', { class: 'meters' },
@@ -607,13 +619,13 @@
 
     function renderHead() {
       const on = dev.online;
-      const key = [dev.name, on].join('|');
+      const key = [dev.name, on, dev.route].join('|');
       if (key !== lastKey) {
         lastKey = key;
         head.replaceChildren(
           h('div', { class: 'dev-title' }, h('span', { class: 'dot ' + (on ? 'on' : 'off') }), h('h1', null, dev.name),
             state.device ? null : h('button', { class: 'icon-btn', title: 'Переименовать', onclick: rename }, '✎'),
-            dev.self ? h('span', { class: 'pill' }, 'главный ПК') : null,
+            dev.self ? h('span', { class: 'pill' }, 'главный ПК') : null, routeBadge(dev),
             h('span', { class: 'pill ' + (on ? 'ok' : '') }, on ? 'в сети' : 'не в сети')),
           h('div', { class: 'actions' },
             on ? [
@@ -857,10 +869,22 @@
     if (!dev.online) { body.append(offlineNote(dev)); return null; }
     const opt = (v, l) => h('option', { value: v }, l);
     const monSel = h('select', { title: 'Монитор' }, opt('-1', 'Основной монитор'));
-    const qSel = h('select', { title: 'Качество изображения' }, opt('85', 'Качество: высокое'), opt('70', 'Качество: среднее'), opt('50', 'Качество: низкое'), opt('30', 'Качество: минимум'));
+    const qSel = h('select', { title: 'Качество изображения' }, opt('95', 'Качество: максимум'), opt('85', 'Качество: высокое'), opt('70', 'Качество: среднее'), opt('50', 'Качество: низкое'), opt('30', 'Качество: минимум'));
     const scaleSel = h('select', { title: 'Разрешение передачи' }, opt('100', 'Разрешение 100%'), opt('50', 'Разрешение 50%'));
     const fpsSel = h('select', { title: 'Частота кадров' }, opt('60', '60 к/с'), opt('30', '30 к/с'), opt('15', '15 к/с'));
     qSel.value = pref('q', '70'); scaleSel.value = pref('scale', '100'); fpsSel.value = pref('fps', '60');
+    // профили под тип связи: по локальной сети — максимум качества и кадров, через интернет — экономно
+    const PROFILES = { lan: { q: '85', fps: '60', scale: '100' }, net: { q: '50', fps: '30', scale: '100' } };
+    const profSel = h('select', { title: 'Профиль передачи' }, opt('auto', 'Авто: по типу связи'), opt('lan', 'Локальная сеть — максимум'),
+      opt('net', 'Интернет — экономно'), opt('custom', 'Свои настройки'));
+    profSel.value = pref('profile', 'auto');
+    const routeProfile = () => (dev.route === 'lan' ? 'lan' : 'net');
+    const applyProfile = () => {
+      const p = PROFILES[profSel.value === 'auto' ? routeProfile() : profSel.value];
+      if (!p) return;
+      qSel.value = p.q; fpsSel.value = p.fps; scaleSel.value = p.scale;
+    };
+    applyProfile();
     const viewOnly = h('input', { type: 'checkbox' });
     const fitBox = h('input', { type: 'checkbox', checked: pref('fit', '1') === '1' });
     const keysSel = h('select', { title: 'Отправить сочетание клавиш' }, opt('', 'Сочетания клавиш…'), opt('win', 'Win'), opt('alttab', 'Alt+Tab'),
@@ -873,7 +897,7 @@
     const pasteBtn = h('button', { class: 'btn sm', title: 'Набрать текст на удалённом ПК' }, 'Вставить текст');
     const reBtn = h('button', { class: 'btn sm ghost' }, 'Переподключить');
     body.append(
-      h('div', { class: 'toolbar' }, monSel, qSel, scaleSel, fpsSel, keysSel, pasteBtn, fsBtn, reBtn),
+      h('div', { class: 'toolbar' }, profSel, monSel, qSel, scaleSel, fpsSel, keysSel, pasteBtn, fsBtn, reBtn),
       h('div', { class: 'toolbar' }, h('label', { class: 'inline' }, fitBox, 'вписать в окно'), h('label', { class: 'inline' }, viewOnly, 'только просмотр'), stats),
       stage);
 
@@ -941,7 +965,7 @@
     const timer = setInterval(() => {
       send({ t: 'ping', ts: performance.now() });
       if (ws && ws.readyState === 1) {
-        stats.textContent = [rtt == null ? 'RTT —' : `RTT ${rtt.toFixed(rtt < 10 ? 1 : 0)} мс`, `${frames} к/с`, fmtRate(bytes),
+        stats.textContent = [ROUTES[dev.route] ? ROUTES[dev.route][0] : '', rtt == null ? 'RTT —' : `RTT ${rtt.toFixed(rtt < 10 ? 1 : 0)} мс`, `${frames} к/с`, fmtRate(bytes),
           canvas.width + '×' + canvas.height, capKind, desk && desk.toLowerCase() !== 'default' ? 'рабочий стол: ' + desk : ''].filter(Boolean).join(' · ');
       }
       frames = 0; bytes = 0;
@@ -979,9 +1003,17 @@
     canvas.addEventListener('blur', () => { if (pressed.size) { send({ t: 'rel' }); pressed.clear(); } });
 
     // ---- панель ----
-    qSel.addEventListener('change', () => { setPref('q', qSel.value); sendCfg(); });
-    fpsSel.addEventListener('change', () => { setPref('fps', fpsSel.value); sendCfg(); });
-    scaleSel.addEventListener('change', () => { setPref('scale', scaleSel.value); sendCfg(); });
+    const custom = () => { profSel.value = 'custom'; setPref('profile', 'custom'); };
+    qSel.addEventListener('change', () => { setPref('q', qSel.value); custom(); sendCfg(); });
+    fpsSel.addEventListener('change', () => { setPref('fps', fpsSel.value); custom(); sendCfg(); });
+    scaleSel.addEventListener('change', () => { setPref('scale', scaleSel.value); custom(); sendCfg(); });
+    profSel.addEventListener('change', () => {
+      setPref('profile', profSel.value);
+      if (profSel.value === 'custom') { qSel.value = pref('q', '70'); fpsSel.value = pref('fps', '60'); scaleSel.value = pref('scale', '100'); }
+      else applyProfile();
+      sendCfg();
+      canvas.focus();
+    });
     monSel.addEventListener('change', () => sendCfg({ mon: +monSel.value }));
     fitBox.addEventListener('change', () => { setPref('fit', fitBox.checked ? '1' : '0'); stage.classList.toggle('fit', fitBox.checked); });
     keysSel.addEventListener('change', () => {

@@ -372,16 +372,19 @@ type deviceView struct {
 	Info     proto.SysInfo `json:"info"`
 	Stats    *proto.Stats  `json:"stats,omitempty"`
 	Lock     InputLock     `json:"lock"`
-	Clip     bool          `json:"clip"`     // участвует в общем буфере обмена
-	Self     bool          `json:"self"`     // это главный ПК
-	Controls []string      `json:"controls"` // кем этот ПК может управлять
+	Clip     bool          `json:"clip"`            // участвует в общем буфере обмена
+	Self     bool          `json:"self"`            // это главный ПК
+	Controls []string      `json:"controls"`        // кем этот ПК может управлять
+	Route    string        `json:"route,omitempty"` // тип связи: lan | vpn | zt | internet
 }
 
 func (s *Server) view(d Device) deviceView {
 	v := deviceView{ID: d.ID, Name: d.Name, LastSeen: d.LastSeen, LastIP: d.LastIP, Created: d.Created, Info: d.Info,
 		Lock: d.Lock, Clip: !d.NoClip, Self: s.isSelf(d), Controls: append([]string{}, d.Controls...)}
 	s.mu.Lock()
-	_, v.Online = s.agents[d.ID]
+	if ac := s.agents[d.ID]; ac != nil {
+		v.Online, v.Route = true, ac.route
+	}
 	if h := s.history[d.ID]; v.Online && len(h) > 0 {
 		st := h[len(h)-1]
 		v.Stats = &st
@@ -762,6 +765,7 @@ func (s *Server) hAgentWS(w http.ResponseWriter, r *http.Request) {
 	}
 	ip := clientIP(r)
 	ac := newAgentConn(dev.ID, ws)
+	ac.route = routeOf(net.ParseIP(ip))
 	s.mu.Lock()
 	old := s.agents[dev.ID]
 	s.agents[dev.ID] = ac
@@ -869,6 +873,7 @@ func (s *Server) hAgentStream(w http.ResponseWriter, r *http.Request) {
 
 type agentConn struct {
 	id      string
+	route   string // как ПК подключён: lan | vpn | zt | internet
 	ws      *websocket.Conn
 	wmu     sync.Mutex
 	pmu     sync.Mutex
@@ -1006,7 +1011,9 @@ func (s *Server) hubAddrs() []hubAddr {
 			out = append(out, hubAddr{URL: u, Kind: kind})
 		}
 	}
-	var lan, vpn, pub []string
+	// порядок важен: агенты выбирают первый доступный адрес, поэтому прямая локальная
+	// сеть всегда впереди, а ZeroTier (через интернет, медленнее) — после неё
+	var lan, vpn, zt, pub []string
 	ifs, _ := net.Interfaces()
 	for _, ifc := range ifs {
 		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 {
@@ -1016,10 +1023,12 @@ func (s *Server) hubAddrs() []hubAddr {
 		for _, a := range addrs {
 			if ipn, ok := a.(*net.IPNet); ok && ipn.IP.To4() != nil && !ipn.IP.IsLinkLocalUnicast() {
 				u := "https://" + net.JoinHostPort(ipn.IP.String(), s.port)
-				switch addrKind(ipn.IP) {
-				case "lan":
+				switch {
+				case isZeroTierIface(ifc.Name):
+					zt = append(zt, u)
+				case addrKind(ipn.IP) == "lan":
 					lan = append(lan, u)
-				case "vpn":
+				case addrKind(ipn.IP) == "vpn":
 					vpn = append(vpn, u)
 				default:
 					pub = append(pub, u)
@@ -1032,6 +1041,9 @@ func (s *Server) hubAddrs() []hubAddr {
 	}
 	for _, u := range vpn {
 		add(u, "vpn")
+	}
+	for _, u := range zt {
+		add(u, "zt")
 	}
 	for _, u := range pub {
 		add(u, "public")

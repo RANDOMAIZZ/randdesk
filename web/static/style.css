@@ -466,3 +466,5 @@ input, select, textarea { transition: border-color .15s, box-shadow .2s, backgro
 #root { min-height: 100%; }
 .auth { min-height: 100vh; }
 @media (max-width: 820px) { .side nav a.active::before { display: none; } .side { backdrop-filter: none; } }
+.badge.zt { color: var(--accent-2); border-color: color-mix(in srgb, var(--accent-2) 45%, transparent); }
+.badge.route { font-weight: 600; }

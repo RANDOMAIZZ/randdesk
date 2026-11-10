@@ -239,6 +239,36 @@ func (a *Agent) connect() (*websocket.Conn, error) {
 	return nil, errors.New(strings.Join(errs, "; "))
 }
 
+// preferBetterRoute переподключается к более приоритетному адресу хаба, когда тот становится
+// доступен: например, ПК вернулся в локальную сеть и прямое подключение быстрее, чем через ZeroTier.
+// Открытые сеансы рабочего стола и консоли идут своими соединениями и не обрываются.
+func (a *Agent) preferBetterRoute(ws *websocket.Conn, done <-chan struct{}) {
+	t := time.NewTicker(45 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-t.C:
+		}
+		hubs, cur := a.hubs(), a.current()
+		idx := -1
+		for i, u := range hubs {
+			if u == cur {
+				idx = i
+			}
+		}
+		if idx <= 0 {
+			continue
+		}
+		if better := reachableOrder(hubs[:idx]); len(better) > 0 {
+			log.Printf("доступен более быстрый адрес хаба %s — переподключаюсь", hubs[better[0]])
+			ws.Close()
+			return
+		}
+	}
+}
+
 // reachableOrder возвращает индексы адресов, до которых удалось установить TCP-соединение,
 // по порядку приоритета. Более приоритетные ждём не дольше 1,5 с после первого ответившего.
 func reachableOrder(hubs []string) []int {
@@ -369,6 +399,7 @@ func (a *Agent) session(stop <-chan struct{}) error {
 
 	done := make(chan struct{})
 	defer close(done)
+	go a.preferBetterRoute(ws, done)
 	go func() {
 		select {
 		case <-stop:
