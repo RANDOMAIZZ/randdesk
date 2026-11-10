@@ -53,3 +53,6 @@ func RunElevated(args []string) error {
 	wd, _ := windows.UTF16PtrFromString(dir)
 	return windows.ShellExecute(0, verb, file, params, wd, windows.SW_NORMAL)
 }
+
+// IsTerminal — на Windows меню показывается при запуске двойным щелчком (см. OwnConsole).
+func IsTerminal() bool { return false }

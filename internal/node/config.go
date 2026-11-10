@@ -28,6 +28,12 @@ type Config struct {
 	Role    string       `json:"role"` // "" — ещё не настроен
 	Account pair.Account `json:"account"`
 	Machine string       `json:"machine"` // постоянный идентификатор этого ПК
+
+	// Сеть через интернет (ZeroTier): ID сети и выключатель. На главном ПК сеть своя,
+	// управляется встроенным контроллером ZeroTier — аккаунт и ключи не нужны.
+	ZTNetwork  string `json:"zt_network,omitempty"`
+	ZTDisabled bool   `json:"zt_disabled,omitempty"`
+	ZTServer   string `json:"zt_server,omitempty"` // свой сервер ntfy (по умолчанию ntfy.sh)
 }
 
 type store struct {

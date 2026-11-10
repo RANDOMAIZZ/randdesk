@@ -31,7 +31,7 @@ func usage() {
 
 func main() {
 	if len(os.Args) < 2 {
-		if ui.OwnConsole() { // запуск двойным щелчком — показываем меню, а не исчезающую справку
+		if ui.OwnConsole() || ui.IsTerminal() { // двойной щелчок (Windows) или запуск в терминале (Linux) — меню вместо справки
 			menu()
 			return
 		}

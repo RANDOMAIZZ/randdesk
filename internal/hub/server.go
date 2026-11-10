@@ -105,6 +105,8 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/users", s.auth(s.hUserCreate))
 	m.HandleFunc("DELETE /api/users/{name}", s.auth(s.hUserDelete))
 	m.HandleFunc("GET /api/internet", s.auth(s.hInternet))
+	m.HandleFunc("GET /api/zerotier", s.auth(s.hZeroTier))
+	m.HandleFunc("POST /api/zerotier", s.auth(s.hZeroTierSet))
 	m.HandleFunc("POST /api/internet", s.auth(s.hInternetSet))
 	m.HandleFunc("POST /api/logout", s.csrf(s.hLogout))
 	m.HandleFunc("POST /api/password", s.auth(s.hPassword))

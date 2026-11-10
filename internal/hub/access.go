@@ -156,6 +156,38 @@ func (s *Server) hClipboard(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, proto.OK{OK: true})
 }
 
+// ---------- интернет-сеть ZeroTier ----------
+
+func (s *Server) hZeroTier(w http.ResponseWriter, r *http.Request) {
+	if s.node == nil || s.node.ZeroTier == nil {
+		jsonErr(w, 404, "доступно только в режиме «Настроить ПК»")
+		return
+	}
+	writeJSON(w, 200, s.node.ZeroTier())
+}
+
+func (s *Server) hZeroTierSet(w http.ResponseWriter, r *http.Request) {
+	if s.node == nil || s.node.SetZeroTier == nil {
+		jsonErr(w, 404, "доступно только в режиме «Настроить ПК»")
+		return
+	}
+	var req struct{ Enabled bool }
+	if err := readJSON(r, &req); err != nil {
+		jsonErr(w, 400, "неверный запрос")
+		return
+	}
+	v, act := "on", "zerotier_enabled"
+	if !req.Enabled {
+		v, act = "off", "zerotier_disabled"
+	}
+	if err := s.node.SetZeroTier(v); err != nil {
+		jsonErr(w, 500, err.Error())
+		return
+	}
+	s.audit.Log(userOf(r), clientIP(r), "", act, "")
+	writeJSON(w, 200, proto.OK{OK: true})
+}
+
 // isSelf — устройство на самом главном ПК.
 func (s *Server) isSelf(d Device) bool {
 	return s.node != nil && s.node.SelfMachine != "" && d.MachineID == s.node.SelfMachine

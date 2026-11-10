@@ -79,7 +79,7 @@ func controlService(name, action string) error {
 	if name == "" {
 		return errors.New("не указано имя службы")
 	}
-	if strings.EqualFold(name, selfServiceName) && action != "start" {
+	if (strings.EqualFold(name, selfServiceName) || strings.EqualFold(name, "RandDesk")) && action != "start" {
 		return errors.New("нельзя останавливать службу самого агента")
 	}
 	scm, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_CONNECT)

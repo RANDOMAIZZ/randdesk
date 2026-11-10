@@ -100,3 +100,6 @@ func (a Account) SignResponse(nonce string, r *Response) { r.Proof = a.respProof
 func (a Account) CheckResponse(nonce string, r Response) bool {
 	return hmac.Equal([]byte(r.Proof), []byte(a.respProof(nonce, r)))
 }
+
+// Subkey — отдельный ключ для другой цели (шифрование точки встречи и т. п.), из секрета учётной записи.
+func (a Account) Subkey(purpose string) []byte { return mac(a.key(), "subkey", purpose) }

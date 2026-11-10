@@ -292,3 +292,5 @@ pre.recovery { background: var(--bg); border: 1px solid var(--border); border-ra
   .rd-stage, .rd-stage.fit { height: 60vh; max-height: none; }
   .table-wrap { max-height: none; }
 }
+.manual.row-inline { display: flex; gap: 8px; flex-wrap: wrap; margin: 0; padding: 0; border: 0; }
+.manual.row-inline input { flex: 1; min-width: 220px; }

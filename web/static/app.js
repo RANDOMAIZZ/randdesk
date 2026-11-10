@@ -270,7 +270,11 @@
     const tick = async () => {
       try {
         const s = await api('GET', '/api/node/status');
-        status.textContent = s.online ? 'Подключено к главному ПК ' + (s.admin || '') : (s.status || 'Поиск главного ПК…');
+        const zt = s.zt || {};
+        status.textContent = s.online ? 'Подключено к главному ПК ' + (s.admin || '')
+          : zt.step ? 'Поиск главного ПК… ' + zt.step
+          : zt.status === 'OK' ? 'Поиск главного ПК… (сеть через интернет подключена)'
+          : (s.status || 'Поиск главного ПК…');
         if (s.error && !s.online) err.textContent = s.error === 'на главном ПК другой логин или пароль' ? 'Главный ПК найден, но логин или пароль не совпадают.' : s.error;
         if (s.online) return boot();
       } catch {}
@@ -1293,29 +1297,30 @@
     const tfaCard = h('div', { class: 'card' }, h('h3', null, 'Двухфакторная аутентификация (2FA)'));
     const usersCard = h('div', { class: 'card' }, h('h3', null, 'Пользователи'));
     const netCard = h('div', { class: 'card' }, h('h3', null, 'Доступ из интернета'));
-    const isMe = (n) => n.toLowerCase() === (state.user || '').toLowerCase();
-    let me = null;
-
-    const loadMe = async () => {
-      me = await api('GET', '/api/me');
-      const actions = me.totp
-        ? [h('button', { class: 'btn sm', onclick: async () => {
-            const v = await confirmWithPassword('Новые резервные коды', 'Старые резервные коды перестанут работать.', 'Создать', 'primary', true);
-            if (!v) return;
-            try { const r = await api('POST', '/api/2fa/recovery', v); await showRecovery(r.recovery); loadMe(); } catch (e) { toast(e.message, 'bad'); }
-          } }, 'Новые резервные коды'),
-          h('button', { class: 'btn sm danger-ghost', onclick: async () => {
-            const v = await confirmWithPassword('Выключить 2FA?', 'Для входа снова будет достаточно только пароля.', 'Выключить', 'danger', true);
-            if (!v) return;
-            try { await api('POST', '/api/2fa/disable', v); toast('Двухфакторная аутентификация выключена', 'ok'); reloadAll(); } catch (e) { toast(e.message, 'bad'); }
-          } }, 'Выключить')]
-        : [h('button', { class: 'btn sm primary', onclick: () => enable2FA(reloadAll) }, 'Включить 2FA')];
-      tfaCard.replaceChildren(h('h3', null, 'Двухфакторная аутентификация (2FA)'),
-        h('p', { class: 'muted' }, 'Кроме пароля при входе понадобится код из приложения на телефоне. Обязательно включите, если хаб доступен из интернета.'),
-        h('div', { class: 'kv', style: { marginBottom: '12px' } },
-          h('span', { class: 'k' }, 'Состояние'), h('span', { class: me.totp ? 'ok-text' : 'bad-text' }, me.totp ? 'включена' : 'выключена'),
-          me.totp ? h('span', { class: 'k' }, 'Резервных кодов') : null, me.totp ? h('span', null, String(me.recovery_left)) : null),
-        h('div', { class: 'key-box' }, actions));
+    const ztCard = h('div', { class: 'card' }, h('h3', null, 'Сеть через интернет (ZeroTier)'));
+    let ztTimer = null;
+    const loadZT = async () => {
+      clearTimeout(ztTimer);
+      let z;
+      try { z = await api('GET', '/api/zerotier'); } catch (e) { if (e.status === 404) { ztCard.remove(); return; } throw e; }
+      const state = !z.enabled ? h('span', { class: 'muted' }, 'выключена')
+        : z.error ? h('span', { class: 'bad-text' }, z.error)
+        : z.status === 'OK' ? h('span', { class: 'ok-text' }, `работает · ПК в сети: ${z.members}`)
+        : h('span', { class: 'muted' }, z.step || 'настройка…');
+      if (z.enabled && (z.status !== 'OK' || z.step)) ztTimer = setTimeout(() => loadZT().catch(() => {}), 4000);
+      ztCard.replaceChildren(h('h3', null, 'Сеть через интернет (ZeroTier)'),
+        toggle('Соединять ПК через интернет в любой сети', 'Дома, на работе, через мобильный интернет — без адресов, проброса портов и аккаунтов. Бесплатно и без ограничений на число ПК.',
+          z.enabled, async (on) => {
+            if (!on && !await confirmDlg('Выключить сеть через интернет?', 'ПК, подключённые только через интернет, потеряют связь с этим ПК.', 'Выключить', 'danger')) { loadZT(); return; }
+            await api('POST', '/api/zerotier', { enabled: on });
+            toast(on ? 'Включаю сеть через интернет…' : 'Сеть через интернет выключена', 'ok');
+            ztTimer = setTimeout(() => loadZT().catch(() => {}), 1500);
+          }),
+        h('div', { class: 'kv', style: { marginTop: '14px' } },
+          h('span', { class: 'k' }, 'Состояние'), state,
+          z.network ? h('span', { class: 'k' }, 'Сеть') : '', z.network ? h('span', { class: 'mono small' }, z.network) : '',
+          z.addresses && z.addresses.length ? h('span', { class: 'k' }, 'Адрес этого ПК') : '', z.addresses && z.addresses.length ? h('span', { class: 'mono small' }, z.addresses.join(', ')) : ''),
+        h('p', { class: 'muted small', style: { marginTop: '10px' } }, 'Как это работает: RandDesk сам ставит ZeroTier на все ПК, а этот ПК создаёт свою закрытую сеть и управляет ею — аккаунт на сайте ZeroTier не нужен. Номер сети передаётся остальным ПК в зашифрованном виде через общедоступный сервис ntfy.sh; прочитать его и попроситься в сеть может только ПК с тем же логином и паролем.'));
     };
 
     const addUser = async () => {
@@ -1398,6 +1403,7 @@
       loadMe().catch((e) => toast(e.message, 'bad'));
       loadUsers().catch((e) => toast(e.message, 'bad'));
       loadNet().catch((e) => toast(e.message, 'bad'));
+      loadZT().catch((e) => toast(e.message, 'bad'));
     };
 
     view.append(h('div', { class: 'page-head' }, h('h1', null, 'Настройки')),
@@ -1413,6 +1419,7 @@
           h('label', { class: 'field' }, h('span', null, 'Повторите новый пароль'), pNew2),
           pErr, h('button', { class: 'btn primary', type: 'submit' }, 'Сменить пароль')),
         usersCard,
+        ztCard,
         netCard,
         h('div', { class: 'card' }, h('h3', null, 'Ключ привязки ПК'),
           h('p', { class: 'muted' }, 'По этому ключу агенты привязываются к вашему хабу. После смены ключа уже привязанные ПК продолжат работать, а новые нужно будет привязывать новым ключом.'),
@@ -1425,7 +1432,7 @@
             } }, 'Сменить ключ')))));
     loadKey().catch((e) => toast(e.message, 'bad'));
     reloadAll();
-    return () => clearTimeout(netTimer);
+    return () => { clearTimeout(netTimer); clearTimeout(ztTimer); };
   }
 
   boot();

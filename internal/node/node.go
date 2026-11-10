@@ -43,6 +43,7 @@ type node struct {
 	admin    string // имя главного ПК
 	pairing  bool
 	switchTo chan struct{}
+	zt       *ztManager
 }
 
 // Run — тело службы: работает до закрытия stop.
@@ -52,6 +53,7 @@ func Run(o Options, stop <-chan struct{}) error {
 		return err
 	}
 	n := &node{o: o, st: st, switchTo: make(chan struct{}, 1)}
+	n.zt = newZT(n)
 	for {
 		var err error
 		switch n.st.get().Role {
@@ -225,6 +227,14 @@ func (n *node) runAdmin(stop <-chan struct{}) error {
 			return n.st.set(func(c *Config) { c.Account = acc })
 		},
 		SelfMachine: cfg.Machine,
+		ZeroTier:    func() any { return n.zt.status() },
+		// SetZeroTier включает ("on") или выключает ("off") сеть через интернет.
+		SetZeroTier: func(value string) error {
+			off := strings.TrimSpace(value) == "off"
+			err := n.st.set(func(c *Config) { c.ZTDisabled = off })
+			n.zt.refresh()
+			return err
+		},
 	}
 	h, err := hub.Start(hub.Options{Listen: ":" + strconv.Itoa(n.o.Port), DataDir: n.st.hubDir(), Node: hooks})
 	if err != nil {
@@ -237,6 +247,7 @@ func (n *node) runAdmin(stop <-chan struct{}) error {
 		}
 		h.EnableInternet()
 	}
+	go n.zt.runAdmin(stop)
 	go announcer(stop, n.o.UDPPort, func() beacon {
 		acc := n.st.get().Account
 		return beacon{RD: 1, Type: "here", Group: acc.Group, Login: loginHash(acc.Login), FP: h.Fingerprint, Port: h.Port, Name: hostname(), Addrs: h.URLs()}
@@ -325,6 +336,7 @@ func (n *node) runMember(parent <-chan struct{}) error {
 	defer func() { n.mu.Lock(); n.link = nil; n.mu.Unlock() }()
 	n.setStatus("Поиск главного ПК…", "")
 	n.startLink(stop)
+	go n.zt.runMember(stop)
 	acc := n.st.get().Account
 	var lastTry sync.Map
 	go seeker(stop, n.o.UDPPort, acc.Group, loginHash(acc.Login),
@@ -386,6 +398,7 @@ func (n *node) memberHandler(stop <-chan struct{}, reset func()) http.Handler {
 		a := n.getLink()
 		resp["linked"] = a != nil
 		resp["online"] = a != nil && a.Online()
+		resp["zt"] = n.zt.status()
 		writeJSON(w, 200, resp)
 	})
 	mux.HandleFunc("POST /api/node/connect", func(w http.ResponseWriter, r *http.Request) {

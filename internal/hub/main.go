@@ -38,6 +38,9 @@ type NodeHooks struct {
 	SetAccount func(login, password string) error
 	// SelfMachine — идентификатор самого главного ПК (его ввод нельзя отключить).
 	SelfMachine string
+	// ZeroTier — состояние сети через интернет; SetZeroTier — включить ("on") или выключить ("off").
+	ZeroTier    func() any
+	SetZeroTier func(token string) error
 }
 
 // Hub — запущенный хаб.

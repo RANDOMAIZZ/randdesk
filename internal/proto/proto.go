@@ -3,7 +3,7 @@ package proto
 
 import "encoding/json"
 
-const Version = "0.3.1"
+const Version = "0.4.0"
 
 // Типы сообщений в управляющем WebSocket-канале агента.
 const (

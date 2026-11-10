@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 
 	"randdesk/internal/node"
@@ -21,15 +22,23 @@ func menu() {
 			return
 		}
 		fmt.Println("  Сейчас RandDesk установится на этот ПК.")
-		fmt.Println("  Windows спросит разрешение на изменения — нажмите «Да».")
+		if runtime.GOOS == "windows" {
+			fmt.Println("  Windows спросит разрешение на изменения — нажмите «Да».")
+		} else {
+			fmt.Println("  Нужны права root — введите пароль sudo, если система спросит.")
+		}
 		if err := ui.RunElevated([]string{"node", "install"}); err != nil {
 			fmt.Println("\n  Не удалось получить права администратора:", err)
 			ui.Pause()
 		}
 		return
 	}
-	ui.OpenBrowser(localURL)
-	fmt.Println("  RandDesk уже установлен и работает. Страница открыта в браузере:", localURL)
+	if runtime.GOOS == "windows" {
+		ui.OpenBrowser(localURL)
+		fmt.Println("  RandDesk уже установлен и работает. Страница открыта в браузере:", localURL)
+	} else {
+		fmt.Println("  RandDesk уже установлен и работает. Страница:", localURL, "(служба: systemctl status RandDesk)")
+	}
 	fmt.Println()
 	fmt.Println("  Enter — закрыть это окно")
 	fmt.Println("  У     — удалить RandDesk с этого ПК")
@@ -39,7 +48,9 @@ func menu() {
 			node.Uninstall()
 			return
 		}
-		fmt.Println("  Windows спросит разрешение — нажмите «Да».")
+		if runtime.GOOS == "windows" {
+			fmt.Println("  Windows спросит разрешение — нажмите «Да».")
+		}
 		if err := ui.RunElevated([]string{"node", "uninstall"}); err != nil {
 			fmt.Println("  Не удалось получить права администратора:", err)
 			ui.Pause()

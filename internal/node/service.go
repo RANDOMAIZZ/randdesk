@@ -35,6 +35,9 @@ func dataDir() string {
 }
 
 func installedExe() string {
+	if runtime.GOOS != "windows" {
+		return "/usr/local/bin/randdesk"
+	}
 	return filepath.Join(os.Getenv("ProgramFiles"), "RandDesk", "randdesk.exe")
 }
 
@@ -156,10 +159,13 @@ func hidden(name string, args ...string) error {
 	return cmd.Run()
 }
 
-// Install копирует программу в Program Files, ставит службу, открывает доступ в брандмауэре
-// и открывает страницу настройки в браузере. Требует прав администратора.
+// Install копирует программу (Program Files или /usr/local/bin), ставит службу (Windows или
+// systemd), открывает доступ в брандмауэре и предлагает настроить ПК. Требует прав администратора.
 func Install() {
 	if !ui.IsElevated() {
+		if runtime.GOOS != "windows" {
+			ui.Fatal("установка требует прав root: sudo ./randdesk install")
+		}
 		ui.Fatal("установка требует прав администратора")
 	}
 	fmt.Println("Установка RandDesk…")
@@ -188,10 +194,9 @@ func Install() {
 		if err := copyFile(self, dst); err != nil {
 			ui.Fatalf("копирование в %s: %v", dst, err)
 		}
+		os.Chmod(dst, 0o755)
 	}
-	hidden("netsh", "advfirewall", "firewall", "delete", "rule", "name=RandDesk")
-	if err := hidden("netsh", "advfirewall", "firewall", "add", "rule", "name=RandDesk", "dir=in", "action=allow",
-		"program="+dst, "enable=yes", "profile=any"); err != nil {
+	if err := openFirewall(dst); err != nil {
 		log.Printf("брандмауэр: %v (разрешите RandDesk вручную, если другие ПК его не видят)", err)
 	}
 	if err := s.Install(); err != nil {
@@ -209,6 +214,10 @@ func Install() {
 			break
 		}
 		time.Sleep(250 * time.Millisecond)
+	}
+	if runtime.GOOS != "windows" && ui.IsTerminal() {
+		setupInTerminal(url) // на Linux (в том числе на серверах без графики) — прямо в терминале
+		return
 	}
 	ui.OpenBrowser(url)
 	fmt.Println("\nГотово! В открывшемся окне браузера нажмите «Настроить ПК».")
@@ -229,7 +238,7 @@ func Uninstall() {
 	if err := s.Uninstall(); err != nil {
 		log.Printf("удаление службы: %v", err)
 	}
-	hidden("netsh", "advfirewall", "firewall", "delete", "rule", "name=RandDesk")
+	closeFirewall()
 	fmt.Println("RandDesk удалён с этого ПК. Настройки остались в " + dataDir() + " — удалите папку, если они не нужны.")
 	ui.Pause()
 }
