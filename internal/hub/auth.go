@@ -330,6 +330,7 @@ func (s *Server) hInternetSet(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	old := s.store.Settings()
+	req.Touched = true
 	if err := s.store.SetSettings(req); err != nil {
 		jsonErr(w, 500, err.Error())
 		return

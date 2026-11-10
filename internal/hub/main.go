@@ -2,7 +2,9 @@ package hub
 
 import (
 	"crypto/tls"
+	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -13,62 +15,125 @@ import (
 	"syscall"
 	"time"
 
+	"randdesk/internal/pair"
 	"randdesk/internal/proto"
 	"randdesk/internal/ui"
 )
 
+// Options — параметры запуска хаба.
+type Options struct {
+	Listen     string
+	DataDir    string
+	CertFile   string
+	KeyFile    string
+	HTTPPolicy string     // lan | all | off
+	Node       *NodeHooks // режим «узла»: ПК связываются по общему логину и паролю
+}
+
+// NodeHooks связывает хаб со службой узла.
+type NodeHooks struct {
+	// Account — текущая учётная запись (секреты из логина и пароля).
+	Account func() pair.Account
+	// SetAccount вызывается при первой настройке ПК и смене пароля.
+	SetAccount func(login, password string) error
+	// SelfMachine — идентификатор самого главного ПК (его ввод нельзя отключить).
+	SelfMachine string
+}
+
+// Hub — запущенный хаб.
+type Hub struct {
+	Fingerprint string
+	Port        int
+	srv         *Server
+	errc        chan error
+}
+
 func Main(args []string) {
 	fs := flag.NewFlagSet("hub", flag.ExitOnError)
-	listen := fs.String("listen", ":8420", "адрес и порт для прослушивания (HTTP и HTTPS на одном порту)")
-	dataDir := fs.String("data", defaultDataDir(), "папка с данными хаба")
-	certFile := fs.String("tls-cert", "", "свой TLS-сертификат (по умолчанию создаётся самоподписанный)")
-	keyFile := fs.String("tls-key", "", "ключ к -tls-cert")
-	httpPolicy := fs.String("http", "lan", "откуда разрешён незашифрованный HTTP: lan (локальная сеть и VPN), all, off (только localhost)")
+	o := Options{}
+	fs.StringVar(&o.Listen, "listen", ":8420", "адрес и порт для прослушивания (HTTP и HTTPS на одном порту)")
+	fs.StringVar(&o.DataDir, "data", defaultDataDir(), "папка с данными хаба")
+	fs.StringVar(&o.CertFile, "tls-cert", "", "свой TLS-сертификат (по умолчанию создаётся самоподписанный)")
+	fs.StringVar(&o.KeyFile, "tls-key", "", "ключ к -tls-cert")
+	fs.StringVar(&o.HTTPPolicy, "http", "lan", "откуда разрешён незашифрованный HTTP: lan (локальная сеть и VPN), all, off (только localhost)")
 	fs.Parse(args)
 
-	switch *httpPolicy {
+	h, err := Start(o)
+	if err != nil {
+		ui.Fatal(err)
+	}
+	if ui.OwnConsole() {
+		log.Printf("хаб работает — не закрывайте это окно (закрытие окна остановит хаб)")
+		ui.OpenBrowser("http://localhost:" + strconv.Itoa(h.Port))
+	}
+	go func() {
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+		<-sig
+		log.Print("остановка хаба…")
+		h.Stop()
+		os.Exit(0)
+	}()
+	ui.Fatal(h.Wait())
+}
+
+// Start запускает хаб и возвращается сразу после того, как порт занят.
+func Start(o Options) (*Hub, error) {
+	if o.Listen == "" {
+		o.Listen = ":8420"
+	}
+	if o.HTTPPolicy == "" {
+		o.HTTPPolicy = "lan"
+	}
+	switch o.HTTPPolicy {
 	case "lan", "all", "off":
 	default:
-		ui.Fatalf("неверный -http %q: допустимо lan, all, off", *httpPolicy)
+		return nil, fmt.Errorf("неверный -http %q: допустимо lan, all, off", o.HTTPPolicy)
 	}
-	if err := os.MkdirAll(*dataDir, 0o700); err != nil {
-		ui.Fatalf("не удалось создать папку данных: %v", err)
+	if err := os.MkdirAll(o.DataDir, 0o700); err != nil {
+		return nil, fmt.Errorf("не удалось создать папку данных: %w", err)
 	}
-	store, err := OpenStore(filepath.Join(*dataDir, "hub.json"))
+	store, err := OpenStore(filepath.Join(o.DataDir, "hub.json"))
 	if err != nil {
-		ui.Fatalf("хранилище: %v", err)
+		return nil, fmt.Errorf("хранилище: %w", err)
 	}
-	audit, err := OpenAudit(filepath.Join(*dataDir, "audit.jsonl"))
+	audit, err := OpenAudit(filepath.Join(o.DataDir, "audit.jsonl"))
 	if err != nil {
-		ui.Fatalf("журнал: %v", err)
+		return nil, fmt.Errorf("журнал: %w", err)
 	}
-	_, portStr, err := net.SplitHostPort(*listen)
+	_, portStr, err := net.SplitHostPort(o.Listen)
 	if err != nil {
-		ui.Fatalf("неверный -listen: %v", err)
+		return nil, fmt.Errorf("неверный -listen: %w", err)
 	}
 	port, _ := strconv.Atoi(portStr)
 
 	var cert tls.Certificate
 	fingerprint := ""
-	if *certFile != "" {
-		if cert, err = tls.LoadX509KeyPair(*certFile, *keyFile); err != nil {
-			ui.Fatalf("TLS-сертификат: %v", err)
+	if o.CertFile != "" {
+		if cert, err = tls.LoadX509KeyPair(o.CertFile, o.KeyFile); err != nil {
+			return nil, fmt.Errorf("TLS-сертификат: %w", err)
 		}
 	} else {
-		if cert, err = loadOrCreateCert(*dataDir); err != nil {
-			ui.Fatalf("самоподписанный сертификат: %v", err)
+		if cert, err = loadOrCreateCert(o.DataDir); err != nil {
+			return nil, fmt.Errorf("самоподписанный сертификат: %w", err)
 		}
 		if fingerprint, err = spkiFingerprint(cert); err != nil {
-			ui.Fatalf("отпечаток сертификата: %v", err)
+			return nil, fmt.Errorf("отпечаток сертификата: %w", err)
 		}
 	}
 
+	ln, err := net.Listen("tcp", o.Listen)
+	if err != nil {
+		return nil, fmt.Errorf("не удалось занять порт %s: %v\nВозможно, RandDesk уже запущен (проверьте http://localhost:%s) или порт занят другой программой", portStr, err, portStr)
+	}
+
 	srv := NewServer(store, audit, portStr, fingerprint)
+	srv.node = o.Node
 	srv.net = newInternet(store, port, srv.broadcastHubs)
 	go srv.net.run()
 	go srv.janitor()
 
-	log.Printf("RandDesk hub %s, данные: %s", proto.Version, *dataDir)
+	log.Printf("RandDesk hub %s, данные: %s", proto.Version, o.DataDir)
 	log.Printf("веб-интерфейс на этом ПК: http://localhost:%s", portStr)
 	if fingerprint != "" {
 		log.Printf("отпечаток сертификата хаба: %s", fingerprint)
@@ -76,18 +141,10 @@ func Main(args []string) {
 	for _, a := range srv.hubAddrs() {
 		log.Printf("адрес для агентов/браузера (%s): %s", a.Kind, a.URL)
 	}
-	if !store.HasUsers() {
-		log.Printf("администратор ещё не создан — откройте http://localhost:%s на этом ПК", portStr)
+	if !store.HasUsers() && o.Node == nil {
+		log.Printf("ПК ещё не настроен — откройте http://localhost:%s на этом ПК", portStr)
 	}
 
-	ln, err := net.Listen("tcp", *listen)
-	if err != nil {
-		ui.Fatalf("не удалось занять порт %s: %v\nВозможно, хаб уже запущен (проверьте http://localhost:%s) или порт занят другой программой.", portStr, err, portStr)
-	}
-	if ui.OwnConsole() {
-		log.Printf("хаб работает — не закрывайте это окно (закрытие окна остановит хаб)")
-		ui.OpenBrowser("http://localhost:" + portStr)
-	}
 	tlsL, plainL := splitListener(ln)
 	handler := srv.Handler()
 	newSrv := func(h http.Handler) *http.Server {
@@ -101,18 +158,35 @@ func Main(args []string) {
 	}
 	hsTLS := newSrv(handler)
 	hsTLS.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"}}
-	hsPlain := newSrv(plainGuard(*httpPolicy, handler))
+	hsPlain := newSrv(plainGuard(o.HTTPPolicy, handler))
 
-	go func() {
-		sig := make(chan os.Signal, 1)
-		signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
-		<-sig
-		log.Print("остановка хаба…")
-		srv.net.shutdown()
-		os.Exit(0)
-	}()
-	go func() { ui.Fatal(hsPlain.Serve(plainL)) }()
-	ui.Fatal(hsTLS.ServeTLS(tlsL, "", ""))
+	h := &Hub{Fingerprint: fingerprint, Port: port, srv: srv, errc: make(chan error, 2)}
+	go func() { h.errc <- hsPlain.Serve(plainL) }()
+	go func() { h.errc <- hsTLS.ServeTLS(tlsL, "", "") }()
+	return h, nil
+}
+
+// Wait ждёт аварийной остановки сервера.
+func (h *Hub) Wait() error {
+	err := <-h.errc
+	if err == nil {
+		err = errors.New("сервер остановлен")
+	}
+	return err
+}
+
+// Stop снимает проброс порта на роутере (вызывается при остановке).
+func (h *Hub) Stop() { h.srv.net.shutdown() }
+
+// EnableInternet включает UPnP-проброс, если пользователь ещё не выбирал вручную.
+func (h *Hub) EnableInternet() {
+	st := h.srv.store.Settings()
+	if !st.UPnP && !st.Touched {
+		st.UPnP = true
+		st.Touched = true
+		h.srv.store.SetSettings(st)
+		h.srv.net.refresh()
+	}
 }
 
 func defaultDataDir() string {
@@ -121,4 +195,9 @@ func defaultDataDir() string {
 		return "data"
 	}
 	return filepath.Join(filepath.Dir(exe), "data")
+}
+
+// CreateAdmin создаёт первого пользователя панели (при настройке главного ПК).
+func (h *Hub) CreateAdmin(login, password string) error {
+	return h.srv.store.CreateUser(login, password, true)
 }

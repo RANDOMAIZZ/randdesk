@@ -44,6 +44,8 @@ type UserView struct {
 type Settings struct {
 	UPnP       bool   `json:"upnp"`        // автоматически пробрасывать порт на роутере
 	PublicHost string `json:"public_host"` // свой внешний адрес/домен (DDNS), host[:port]
+	Touched    bool   `json:"touched"`     // пользователь менял настройки вручную
+	ClipShared bool   `json:"clip_shared"` // единый буфер обмена между ПК
 }
 
 type Device struct {
@@ -54,6 +56,17 @@ type Device struct {
 	LastSeen  time.Time     `json:"last_seen"`
 	LastIP    string        `json:"last_ip"`
 	Info      proto.SysInfo `json:"info"`
+	MachineID string        `json:"machine_id,omitempty"` // для привязки по логину: один ПК — одна запись
+	Controls  []string      `json:"controls,omitempty"`   // ID устройств, которыми этому ПК разрешено управлять
+	Lock      InputLock     `json:"lock"`                 // отключённые администратором устройства ввода
+	NoClip    bool          `json:"no_clip,omitempty"`    // не участвует в едином буфере обмена
+}
+
+// InputLock — какие устройства ввода отключены на ПК.
+type InputLock struct {
+	Keyboard bool `json:"keyboard"`
+	Mouse    bool `json:"mouse"`
+	Gamepad  bool `json:"gamepad"`
 }
 
 type storeData struct {
@@ -326,6 +339,43 @@ func (s *Store) Enroll(key, hostname, ip string) (proto.EnrollResp, error) {
 	return proto.EnrollResp{DeviceID: d.ID, Token: token}, nil
 }
 
+// Pair — устройство по постоянному идентификатору ПК: повторная привязка того же ПК
+// выдаёт новый токен существующей записи, а не создаёт дубль.
+func (s *Store) Pair(machine, hostname, ip string) (proto.EnrollResp, error) {
+	machine = normMachine(machine)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	token := randToken(32)
+	name := strings.TrimSpace(hostname)
+	if name == "" {
+		name = "ПК"
+	}
+	for _, d := range s.d.Devices {
+		if machine != "" && d.MachineID == machine {
+			d.TokenHash = hashToken(token)
+			d.LastIP = ip
+			if err := s.saveLocked(); err != nil {
+				return proto.EnrollResp{}, err
+			}
+			return proto.EnrollResp{DeviceID: d.ID, Token: token}, nil
+		}
+	}
+	d := &Device{
+		ID:        hex.EncodeToString(randBytes(8)),
+		Name:      name,
+		TokenHash: hashToken(token),
+		Created:   time.Now(),
+		LastSeen:  time.Now(),
+		LastIP:    ip,
+		MachineID: machine,
+	}
+	s.d.Devices = append(s.d.Devices, d)
+	if err := s.saveLocked(); err != nil {
+		return proto.EnrollResp{}, err
+	}
+	return proto.EnrollResp{DeviceID: d.ID, Token: token}, nil
+}
+
 func (s *Store) AuthDevice(id, token string) (Device, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -391,6 +441,35 @@ func (s *Store) Touch(id, ip string) {
 	}
 }
 
+// UpdateDevice изменяет запись устройства под блокировкой.
+func (s *Store) UpdateDevice(id string, fn func(d *Device)) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, d := range s.d.Devices {
+		if d.ID == id {
+			fn(d)
+			return s.saveLocked()
+		}
+	}
+	return errors.New("устройство не найдено")
+}
+
+// CanControl — разрешено ли ПК from управлять ПК to.
+func (s *Store) CanControl(from, to string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, d := range s.d.Devices {
+		if d.ID == from {
+			for _, c := range d.Controls {
+				if c == to {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func (s *Store) Rename(id, name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -409,6 +488,9 @@ func (s *Store) Delete(id string) error {
 	for i, d := range s.d.Devices {
 		if d.ID == id {
 			s.d.Devices = append(s.d.Devices[:i], s.d.Devices[i+1:]...)
+			for _, o := range s.d.Devices { // убираем удалённый ПК из разрешений
+				o.Controls = removeStr(o.Controls, id)
+			}
 			return s.saveLocked()
 		}
 	}
@@ -416,6 +498,16 @@ func (s *Store) Delete(id string) error {
 }
 
 // ---------- утилиты ----------
+
+func removeStr(list []string, v string) []string {
+	out := list[:0]
+	for _, x := range list {
+		if x != v {
+			out = append(out, x)
+		}
+	}
+	return out
+}
 
 func randBytes(n int) []byte {
 	b := make([]byte, n)

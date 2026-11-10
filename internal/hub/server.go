@@ -55,6 +55,9 @@ type Server struct {
 	sessions      map[string]session
 	tickets       map[string]*loginTicket
 	pendingTOTP   map[string]pendingTOTP
+	nonces        map[string]time.Time
+	node          *NodeHooks
+	sessions2     map[string]*sessionConn // помощники сеанса по ID устройства
 }
 
 func NewServer(store *Store, audit *Audit, port, fingerprint string) *Server {
@@ -107,17 +110,23 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/password", s.auth(s.hPassword))
 	m.HandleFunc("GET /api/enroll-key", s.auth(s.hEnrollKey))
 	m.HandleFunc("POST /api/enroll-key/rotate", s.auth(s.hRotateKey))
-	m.HandleFunc("GET /api/devices", s.auth(s.hDevices))
-	m.HandleFunc("GET /api/devices/{id}", s.auth(s.hDevice))
-	m.HandleFunc("GET /api/devices/{id}/history", s.auth(s.hHistory))
+	m.HandleFunc("GET /api/devices", s.authDev(s.hDevices, false))
+	m.HandleFunc("GET /api/devices/{id}", s.authDev(s.hDevice, true))
+	m.HandleFunc("GET /api/devices/{id}/history", s.authDev(s.hHistory, true))
+	m.HandleFunc("GET /api/access", s.auth(s.hAccess))
+	m.HandleFunc("POST /api/access", s.auth(s.hAccessSet))
+	m.HandleFunc("POST /api/devices/{id}/input", s.auth(s.hInput))
+	m.HandleFunc("POST /api/devices/{id}/clipboard", s.auth(s.hClipboard))
+	m.HandleFunc("GET /api/agent/session", s.hAgentSession)
 	m.HandleFunc("POST /api/devices/{id}/rename", s.auth(s.hRename))
 	m.HandleFunc("DELETE /api/devices/{id}", s.auth(s.hDelete))
-	m.HandleFunc("POST /api/devices/{id}/rpc/{method}", s.auth(s.hRPC))
-	m.HandleFunc("POST /api/devices/{id}/wake", s.auth(s.hWake))
-	m.HandleFunc("GET /api/devices/{id}/terminal", s.auth(s.hTerminal))
-	m.HandleFunc("GET /api/devices/{id}/desktop", s.auth(s.hDesktop))
+	m.HandleFunc("POST /api/devices/{id}/rpc/{method}", s.authDev(s.hRPC, true))
+	m.HandleFunc("POST /api/devices/{id}/wake", s.authDev(s.hWake, true))
+	m.HandleFunc("GET /api/devices/{id}/terminal", s.authDev(s.hTerminal, true))
+	m.HandleFunc("GET /api/devices/{id}/desktop", s.authDev(s.hDesktop, true))
 	m.HandleFunc("GET /api/audit", s.auth(s.hAudit))
 	m.HandleFunc("POST /api/agent/enroll", s.hAgentEnroll)
+	m.HandleFunc("POST /api/agent/pair", s.hAgentPair)
 	m.HandleFunc("GET /api/agent/ws", s.hAgentWS)
 	m.HandleFunc("GET /api/agent/stream", s.hAgentStream)
 	m.Handle("/", s.static)
@@ -243,13 +252,21 @@ func (s *Server) deviceName(id string) string {
 // ---------- аккаунт ----------
 
 func (s *Server) hState(w http.ResponseWriter, r *http.Request) {
+	asDevice := ""
+	if r.Header.Get("X-RandDesk-Local") == "1" {
+		if d, ok := s.authAgent(r); ok {
+			asDevice = d.Name
+		}
+	}
 	writeJSON(w, 200, map[string]any{
+		"as_device":      asDevice,
 		"version":        proto.Version,
 		"setup_needed":   !s.store.HasUsers(),
 		"can_setup":      isLoopback(r),
 		"user":           s.sessionUser(r),
 		"hub_urls":       s.hubURLs(),
 		"secure":         r.TLS != nil,
+		"node":           s.node != nil,
 		"server_time_ms": time.Now().UnixMilli(),
 	})
 }
@@ -272,6 +289,11 @@ func (s *Server) hSetup(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.CreateUser(req.User, req.Password, true); err != nil {
 		jsonErr(w, http.StatusConflict, err.Error())
 		return
+	}
+	if s.node != nil {
+		if err := s.node.SetAccount(req.User, req.Password); err != nil {
+			log.Printf("настройка ПК: %v", err)
+		}
 	}
 	s.audit.Log(req.User, clientIP(r), "", "setup", "создан администратор")
 	s.startSession(w, r, req.User)
@@ -307,6 +329,11 @@ func (s *Server) hPassword(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 500, err.Error())
 		return
 	}
+	if s.node != nil && strings.EqualFold(s.node.Account().Login, user) {
+		if err := s.node.SetAccount(user, req.New); err != nil {
+			log.Printf("смена пароля: %v", err)
+		}
+	}
 	// сбрасываем остальные сессии пользователя
 	s.dropSessions(user, currentSession(r))
 	s.audit.Log(user, clientIP(r), "", "password_changed", "")
@@ -314,7 +341,7 @@ func (s *Server) hPassword(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) hEnrollKey(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"key": s.store.EnrollKey(), "hub_urls": s.hubURLs(), "addrs": s.hubAddrs(), "fingerprint": s.fingerprint})
+	writeJSON(w, 200, map[string]any{"key": s.store.EnrollKey(), "hub_urls": s.hubURLs(), "addrs": s.hubAddrs(), "fingerprint": s.fingerprint, "node": s.node != nil})
 }
 
 func (s *Server) hRotateKey(w http.ResponseWriter, r *http.Request) {
@@ -342,10 +369,15 @@ type deviceView struct {
 	Created  time.Time     `json:"created"`
 	Info     proto.SysInfo `json:"info"`
 	Stats    *proto.Stats  `json:"stats,omitempty"`
+	Lock     InputLock     `json:"lock"`
+	Clip     bool          `json:"clip"`     // участвует в общем буфере обмена
+	Self     bool          `json:"self"`     // это главный ПК
+	Controls []string      `json:"controls"` // кем этот ПК может управлять
 }
 
 func (s *Server) view(d Device) deviceView {
-	v := deviceView{ID: d.ID, Name: d.Name, LastSeen: d.LastSeen, LastIP: d.LastIP, Created: d.Created, Info: d.Info}
+	v := deviceView{ID: d.ID, Name: d.Name, LastSeen: d.LastSeen, LastIP: d.LastIP, Created: d.Created, Info: d.Info,
+		Lock: d.Lock, Clip: !d.NoClip, Self: s.isSelf(d), Controls: append([]string{}, d.Controls...)}
 	s.mu.Lock()
 	_, v.Online = s.agents[d.ID]
 	if h := s.history[d.ID]; v.Online && len(h) > 0 {
@@ -359,8 +391,16 @@ func (s *Server) view(d Device) deviceView {
 func (s *Server) hDevices(w http.ResponseWriter, r *http.Request) {
 	devs := s.store.Devices()
 	out := make([]deviceView, 0, len(devs))
+	me := deviceOf(r)
 	for _, d := range devs {
-		out = append(out, s.view(d))
+		if me != "" && !s.store.CanControl(me, d.ID) {
+			continue // ПК видит только устройства, которыми ему разрешено управлять
+		}
+		v := s.view(d)
+		if me != "" {
+			v.Controls = nil
+		}
+		out = append(out, v)
 	}
 	writeJSON(w, 200, out)
 }
@@ -730,6 +770,9 @@ func (s *Server) hAgentWS(w http.ResponseWriter, r *http.Request) {
 	s.store.Touch(dev.ID, ip)
 	log.Printf("агент в сети: %s (%s)", dev.Name, ip)
 	s.sendHubs(ac)
+	if dev.Lock.Gamepad { // геймпад должен оставаться отключённым и после перезагрузки ПК
+		go s.setGamepad(ac, true)
+	}
 	defer func() {
 		s.mu.Lock()
 		if s.agents[dev.ID] == ac {

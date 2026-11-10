@@ -27,6 +27,7 @@
     devices: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
     run: '<path d="M4 17l6-5-6-5M12 19h8"/>',
     log: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+    access: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
     settings: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
     logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
     power: '<path d="M18.36 6.64a9 9 0 1 1-12.73 0M12 2v10"/>',
@@ -95,7 +96,7 @@
     let data = null;
     if (txt) { try { data = JSON.parse(txt); } catch { data = txt; } }
     if (!r.ok) {
-      if (r.status === 401 && state.user && !path.startsWith('/api/login')) { state.user = null; boot(); }
+      if ((r.status === 401 || (r.status === 503 && state.device)) && state.user && !path.startsWith('/api/login')) { state.user = null; boot(); }
       throw new ApiError(r.status, (data && data.error) || r.statusText);
     }
     return data;
@@ -173,11 +174,110 @@
       return;
     }
     state.hubUrls = st.hub_urls || [];
+    state.device = null;
+    if (st.node_setup) return renderNodeSetup(st);
+    if (st.node_member && st.searching) return renderMemberWait();
+    if (st.as_device) { // обычный ПК: доступны только устройства, разрешённые администратором
+      state.device = st.as_device;
+      state.user = st.as_device;
+      renderShell();
+      route();
+      return;
+    }
     if (st.setup_needed) return renderAuth('setup', st);
     if (!st.user) return renderAuth('login', st);
     state.user = st.user;
     renderShell();
     route();
+  }
+
+  // ---------- первая настройка ПК («Настроить ПК») ----------
+  function renderNodeSetup(st) {
+    const err = h('div', { class: 'form-err' });
+    let role = 'member';
+    const user = h('input', { type: 'text', autocomplete: 'username', placeholder: 'Логин', required: true });
+    const pass = h('input', { type: 'password', autocomplete: 'new-password', placeholder: 'Пароль (от 8 символов)', required: true });
+    const pass2 = h('input', { type: 'password', autocomplete: 'new-password', placeholder: 'Повторите пароль' });
+    const hint = h('p', { class: 'muted small' });
+    const roleCard = (value, title, text) => {
+      const rb = h('input', { type: 'radio', name: 'role', value, checked: value === role });
+      rb.addEventListener('change', () => { role = value; upd(); });
+      return h('label', { class: 'role-card' }, rb, h('span', null, h('b', null, title), h('span', { class: 'muted small' }, text)));
+    };
+    const upd = () => {
+      pass2.style.display = role === 'admin' ? '' : 'none';
+      pass2.required = role === 'admin';
+      hint.textContent = role === 'admin'
+        ? 'Придумайте логин и пароль. На остальных ПК введите те же — и они сами подключатся к этому ПК.'
+        : 'Введите тот же логин и пароль, что на главном ПК. Этот ПК сам найдёт главный в сети.';
+    };
+    const btn = h('button', { class: 'btn primary wide', type: 'submit' }, 'Настроить ПК');
+    const form = h('form', {
+      class: 'auth-card setup-card',
+      onsubmit: async (e) => {
+        e.preventDefault();
+        err.textContent = '';
+        if (role === 'admin' && pass.value !== pass2.value) { err.textContent = 'Пароли не совпадают'; return; }
+        btn.disabled = true; btn.textContent = 'Настраиваю…';
+        try {
+          await api('POST', '/api/node/setup', { role, user: user.value, password: pass.value });
+          root.replaceChildren(h('div', { class: 'boot' }, 'Готово, запускаю RandDesk…'));
+          const t0 = Date.now();
+          const wait = async () => {
+            try { const s = await api('GET', '/api/state'); if (!s.node_setup) return boot(); } catch {}
+            if (Date.now() - t0 < 30000) setTimeout(wait, 700); else boot();
+          };
+          setTimeout(wait, 800);
+        } catch (ex) { err.textContent = ex.message; btn.disabled = false; btn.textContent = 'Настроить ПК'; }
+      },
+    },
+      h('div', { class: 'brand big' }, logo(), h('span', null, 'RandDesk')),
+      h('h2', null, 'Настройка ПК «' + (st.host || 'этот ПК') + '»'),
+      h('div', { class: 'role-list' },
+        roleCard('admin', 'Главный ПК (администратор)', 'Отсюда вы управляете всеми ПК и раздаёте разрешения.'),
+        roleCard('member', 'Обычный ПК', 'Подключается к главному ПК. Управлять другими ПК — только с разрешения администратора.')),
+      user, pass, pass2, hint, err, btn);
+    upd();
+    root.replaceChildren(h('div', { class: 'auth' }, form));
+    user.focus();
+  }
+
+  // ---------- обычный ПК ищет главный ----------
+  function renderMemberWait() {
+    const status = h('p', { class: 'muted' }, 'Поиск главного ПК…');
+    const err = h('div', { class: 'form-err' });
+    const addr = h('input', { type: 'text', placeholder: 'например 203.0.113.5 или myhome.duckdns.org' });
+    const btn = h('button', { class: 'btn sm', type: 'submit' }, 'Подключиться');
+    const manual = h('form', { class: 'manual', onsubmit: async (e) => {
+      e.preventDefault(); btn.disabled = true; err.textContent = '';
+      try { await api('POST', '/api/node/connect', { address: addr.value }); toast('Подключено', 'ok'); } catch (ex) { err.textContent = ex.message; } finally { btn.disabled = false; }
+    } }, h('p', { class: 'muted small' }, 'Главный ПК в другой сети (через интернет)? Введите его внешний адрес — он есть в настройках главного ПК:'),
+      h('div', { class: 'row' }, addr, btn));
+    root.replaceChildren(h('div', { class: 'auth' }, h('div', { class: 'auth-card' },
+      h('div', { class: 'brand big' }, logo(), h('span', null, 'RandDesk')),
+      h('div', { class: 'spinner' }), status, err,
+      h('p', { class: 'muted small' }, 'Убедитесь, что главный ПК включён и на нём RandDesk настроен с тем же логином и паролем. ПК в одной сети (или в Radmin VPN) найдут друг друга сами.'),
+      manual,
+      h('button', { class: 'btn sm ghost', style: { marginTop: '10px' }, onclick: async () => {
+        if (!await confirmDlg('Изменить логин и пароль?', 'Этот ПК вернётся к первой настройке, и вы сможете ввести логин и пароль заново.', 'Изменить')) return;
+        try {
+          await api('POST', '/api/node/reset');
+          root.replaceChildren(h('div', { class: 'boot' }, 'Загрузка…'));
+          setTimeout(boot, 1200);
+        } catch (e) { toast(e.message, 'bad'); }
+      } }, 'Изменить логин и пароль'))));
+    let timer = null;
+    const tick = async () => {
+      try {
+        const s = await api('GET', '/api/node/status');
+        status.textContent = s.online ? 'Подключено к главному ПК ' + (s.admin || '') : (s.status || 'Поиск главного ПК…');
+        if (s.error && !s.online) err.textContent = s.error === 'на главном ПК другой логин или пароль' ? 'Главный ПК найден, но логин или пароль не совпадают.' : s.error;
+        if (s.online) return boot();
+      } catch {}
+      timer = setTimeout(tick, 2000);
+    };
+    tick();
+    state.cleanup = () => clearTimeout(timer);
   }
 
   function renderAuth(mode, st) {
@@ -247,14 +347,17 @@
   }
 
   // ---------- каркас и маршрутизация ----------
-  const NAV = [['#/', 'Устройства', 'devices'], ['#/exec', 'Массовое выполнение', 'run'], ['#/audit', 'Журнал', 'log'], ['#/settings', 'Настройки', 'settings']];
+  const NAV = [['#/', 'Устройства', 'devices'], ['#/access', 'Доступ', 'access'], ['#/exec', 'Массовое выполнение', 'run'], ['#/audit', 'Журнал', 'log'], ['#/settings', 'Настройки', 'settings']];
+  const NAV_DEVICE = [['#/', 'Доступные ПК', 'devices']];
 
   function renderShell() {
     const side = h('aside', { class: 'side' },
       h('div', { class: 'brand' }, logo(), h('span', null, 'RandDesk')),
-      h('nav', null, NAV.map(([href, label, ic]) => h('a', { href, 'data-nav': href, title: label }, icon(ic), h('span', null, label)))),
-      h('div', { class: 'side-foot' }, h('span', { class: 'muted small ell' }, state.user),
-        h('button', { class: 'btn ghost sm', onclick: logout, title: 'Выйти' }, icon('logout'), 'Выйти')));
+      h('nav', null, (state.device ? NAV_DEVICE : NAV).map(([href, label, ic]) => h('a', { href, 'data-nav': href, title: label }, icon(ic), h('span', null, label)))),
+      state.device
+        ? h('div', { class: 'side-foot' }, h('span', { class: 'muted small ell', title: 'Управление — с разрешения администратора' }, 'Этот ПК: ' + state.device))
+        : h('div', { class: 'side-foot' }, h('span', { class: 'muted small ell' }, state.user),
+          h('button', { class: 'btn ghost sm', onclick: logout, title: 'Выйти' }, icon('logout'), 'Выйти')));
     root.replaceChildren(h('div', { class: 'app' }, side, h('main', { class: 'main', id: 'view' })));
   }
 
@@ -274,7 +377,9 @@
     if (parts[0] === 'device' && parts[1]) c = pageDevice(view, decodeURIComponent(parts[1]), parts[2] || 'overview');
     else if (parts[0] === 'exec') c = pageExec(view);
     else if (parts[0] === 'audit') c = pageAudit(view);
+    else if (state.device) c = pageDevices(view);
     else if (parts[0] === 'settings') c = pageSettings(view);
+    else if (parts[0] === 'access') c = pageAccess(view);
     else c = pageDevices(view);
     state.cleanup = c || null;
     window.scrollTo(0, 0);
@@ -303,6 +408,20 @@
   async function showAddDevice() {
     let k;
     try { k = await api('GET', '/api/enroll-key'); } catch (e) { toast(e.message, 'bad'); return; }
+    if (k.node) {
+      const adv = h('button', { class: 'btn sm ghost', type: 'button', onclick: () => { document.querySelector('.modal-wrap').remove(); showAddDeviceKey(k); } }, 'Другой способ — по ключу привязки');
+      return modal('Добавить ПК', [
+        h('ol', { class: 'steps' },
+          h('li', null, 'Скопируйте randdesk.exe на другой ПК (или скачайте со страницы релизов).'),
+          h('li', null, 'Запустите его двойным щелчком и разрешите установку.'),
+          h('li', null, 'В открывшемся окне выберите «Обычный ПК», введите тот же логин и пароль, что здесь, и нажмите «Настроить ПК».')),
+        h('p', { class: 'muted small' }, 'ПК в одной сети (или в Radmin VPN) найдут друг друга сами. Если другой ПК в другой сети, укажите на нём адрес этого ПК из «Настройки → Доступ из интернета».'),
+        adv]);
+    }
+    return showAddDeviceKey(k);
+  }
+
+  async function showAddDeviceKey(k) {
     const addrs = (k.addrs && k.addrs.length) ? k.addrs : [{ url: location.origin, kind: 'lan' }];
     const inst = cmdBlock(''), cons = cmdBlock('');
     const warn = h('div', { class: 'form-err' });
@@ -338,8 +457,9 @@
     const tiles = h('div', { class: 'tiles' });
     const grid = h('div', { class: 'dev-grid' });
     view.append(
-      h('div', { class: 'page-head' }, h('h1', null, 'Устройства'),
-        h('div', { class: 'actions' }, h('button', { class: 'btn primary', onclick: showAddDevice }, '+ Добавить ПК'))),
+      h('div', { class: 'page-head' }, h('h1', null, state.device ? 'Доступные ПК' : 'Устройства'),
+        state.device ? null : h('div', { class: 'actions' }, h('button', { class: 'btn primary', onclick: showAddDevice }, '+ Добавить ПК'))),
+      state.device ? h('p', { class: 'muted', style: { marginTop: '-8px' } }, 'ПК, которыми администратор разрешил управлять с этого ПК.') : '',
       tiles, grid);
     let empty = null;
     return poll(async () => {
@@ -354,9 +474,12 @@
         tile('Память (ПК в сети)', mt ? `${fmtBytes(mu)} / ${fmtBytes(mt)}` : '—'));
       if (!devs.length) {
         if (!empty) {
-          empty = h('div', { class: 'empty' }, h('h2', null, 'Пока нет ни одного ПК'),
-            h('p', null, 'Установите агента RandDesk на компьютер и привяжите его ключом из этого хаба.'),
-            h('button', { class: 'btn primary', onclick: showAddDevice }, 'Как добавить ПК'));
+          empty = state.device
+            ? h('div', { class: 'empty' }, h('h2', null, 'Пока нет доступных ПК'),
+              h('p', null, 'Этот ПК подключён к главному. Управлять другими ПК можно после того, как администратор разрешит это на главном ПК (страница «Доступ»).'))
+            : h('div', { class: 'empty' }, h('h2', null, 'Пока нет ни одного ПК'),
+              h('p', null, 'Запустите randdesk.exe на другом ПК, выберите «Обычный ПК» и введите тот же логин и пароль.'),
+              h('button', { class: 'btn primary', onclick: showAddDevice }, 'Как добавить ПК'));
           grid.replaceChildren(empty);
         }
         return;
@@ -364,6 +487,13 @@
       empty = null;
       grid.replaceChildren(...devs.map(deviceCard));
     }, 3000);
+  }
+
+  // значок «ввод отключён» на карточке ПК
+  function lockBadge(d) {
+    const l = d.lock || {};
+    const off = [l.keyboard && 'клавиатура', l.mouse && 'мышь', l.gamepad && 'геймпад'].filter(Boolean);
+    return off.length ? h('span', { class: 'pill warn', title: 'Отключено администратором: ' + off.join(', ') }, '⛔ ' + off.join(', ')) : null;
   }
 
   function deviceCard(d) {
@@ -374,7 +504,8 @@
     const href = '#/device/' + enc(d.id);
     return h('div', { class: 'dev-card' + (d.online ? '' : ' offline') },
       h('div', { class: 'dev-top' }, h('span', { class: 'dot ' + (d.online ? 'on' : 'off') }),
-        h('a', { class: 'dev-name ell', href }, d.name), h('span', { class: 'muted small right ell' }, shortOS(d.info))),
+        h('a', { class: 'dev-name ell', href }, d.name), d.self ? h('span', { class: 'pill' }, 'главный') : null,
+        lockBadge(d), h('span', { class: 'muted small right ell' }, shortOS(d.info))),
       h('div', { class: 'muted small ell' }, [d.info.hostname, ip].filter(Boolean).join(' · ') || '—'),
       d.online && st
         ? h('div', { class: 'meters' },
@@ -425,7 +556,8 @@
         lastKey = key;
         head.replaceChildren(
           h('div', { class: 'dev-title' }, h('span', { class: 'dot ' + (on ? 'on' : 'off') }), h('h1', null, dev.name),
-            h('button', { class: 'icon-btn', title: 'Переименовать', onclick: rename }, '✎'),
+            state.device ? null : h('button', { class: 'icon-btn', title: 'Переименовать', onclick: rename }, '✎'),
+            dev.self ? h('span', { class: 'pill' }, 'главный ПК') : null,
             h('span', { class: 'pill ' + (on ? 'ok' : '') }, on ? 'в сети' : 'не в сети')),
           h('div', { class: 'actions' },
             on ? [
@@ -436,7 +568,7 @@
             ] : [
               hasMac(dev) ? h('button', { class: 'btn sm primary', onclick: () => wake(dev) }, icon('power'), 'Включить (WoL)') : null,
             ],
-            h('button', { class: 'btn sm danger-ghost', onclick: remove }, 'Удалить')));
+            state.device || dev.self ? null : h('button', { class: 'btn sm danger-ghost', onclick: remove }, 'Удалить')));
       }
       sub.textContent = [shortOS(dev.info), dev.info.hostname, primaryIP(dev), on ? null : 'последний раз в сети ' + fmtAgo(dev.last_seen)].filter(Boolean).join(' · ');
     }
@@ -514,6 +646,39 @@
     }
   }
 
+  // переключатель «включено/отключено»
+  function toggle(label, hint, on, onChange, disabled) {
+    const cb = h('input', { type: 'checkbox', checked: on, disabled: !!disabled });
+    cb.addEventListener('change', async () => {
+      cb.disabled = true;
+      try { await onChange(cb.checked); } catch (e) { cb.checked = !cb.checked; toast(e.message, 'bad'); } finally { cb.disabled = !!disabled; }
+    });
+    return h('label', { class: 'switch-row' + (disabled ? ' disabled' : '') }, cb, h('span', { class: 'sw' }),
+      h('span', null, h('b', null, label), hint ? h('div', { class: 'muted small' }, hint) : null));
+  }
+
+  // карточка администратора: устройства ввода и общий буфер обмена
+  function inputCard(d) {
+    const lock = { ...d.lock };
+    const send = async () => { await api('POST', `/api/devices/${enc(d.id)}/input`, lock); };
+    const set = (k, label) => async (on) => {
+      lock[k] = !on;
+      try { await send(); toast(`${label}: ${on ? 'включена' : 'отключена'}`, 'ok'); } catch (e) { lock[k] = on; throw e; }
+    };
+    const selfNote = d.self ? 'На главном ПК клавиатуру и мышь отключить нельзя.' : 'Удалённое управление через RandDesk продолжит работать.';
+    return h('div', { class: 'card input-card' },
+      h('h3', null, 'Устройства ввода и буфер обмена'),
+      h('div', { class: 'switches' },
+        toggle('Клавиатура', selfNote, !lock.keyboard, set('keyboard', 'Клавиатура'), d.self),
+        toggle('Мышь', selfNote, !lock.mouse, set('mouse', 'Мышь'), d.self),
+        toggle('Геймпад', 'Игровые контроллеры (Xbox, DualSense и др.) отключаются в диспетчере устройств.', !lock.gamepad, async (on) => {
+          lock.gamepad = !on;
+          try { await send(); toast(`Геймпад: ${on ? 'включён' : 'отключён'}`, 'ok'); } catch (e) { lock.gamepad = on; throw e; }
+        }),
+        toggle('Общий буфер обмена', 'Скопированный текст появляется на других ПК. Включается для всех на странице «Доступ».', d.clip,
+          async (on) => { await api('POST', `/api/devices/${enc(d.id)}/clipboard`, { enabled: on }); toast(on ? 'ПК участвует в общем буфере' : 'ПК исключён из общего буфера', 'ok'); })));
+  }
+
   function tabOverview(body, dev0) {
     const id = dev0.id;
     const info = h('div', { class: 'info-grid' });
@@ -522,7 +687,7 @@
     const netC = chartBox('Сеть · 10 мин', [['--ok', 'приём'], ['--warn', 'передача']]);
     const disks = h('div');
     const nics = h('div', { class: 'kv' });
-    body.append(info, h('div', { class: 'charts' }, cpuC.el, memC.el, netC.el),
+    body.append(info, state.device ? '' : inputCard(dev0), h('div', { class: 'charts' }, cpuC.el, memC.el, netC.el),
       h('div', { class: 'two-col' }, h('div', { class: 'card' }, h('h3', null, 'Диски'), disks), h('div', { class: 'card' }, h('h3', null, 'Сетевые адаптеры'), nics)));
     let points = [], since = 0;
     const cell = (k, v) => h('div', null, h('div', { class: 'k' }, k), h('div', { class: 'v', title: String(v) }, v));
@@ -1005,6 +1170,50 @@
   }
 
   // ---------- страница: настройки ----------
+  // ---------- страница: доступ (кто кем управляет, общий буфер обмена) ----------
+  function pageAccess(view) {
+    const box = h('div');
+    view.append(h('div', { class: 'page-head' }, h('h1', null, 'Доступ')),
+      h('p', { class: 'muted', style: { marginTop: '-8px' } }, 'Отметьте, каким ПК можно управлять другими. Без вашего разрешения обычные ПК друг друга не видят.'),
+      box);
+    const load = async () => {
+      const [devs, acc] = await Promise.all([api('GET', '/api/devices'), api('GET', '/api/access')]);
+      const grants = acc.grants || {};
+      const save = async (body) => { await api('POST', '/api/access', body); };
+      const others = devs.filter((d) => !d.self);
+      const clipCard = h('div', { class: 'card' }, h('h3', null, 'Единый буфер обмена'),
+        toggle('Общий буфер обмена для всех ПК', 'Текст, скопированный на одном ПК, можно вставить на любом другом. Отдельный ПК можно исключить на его странице.',
+          acc.clip_shared, async (on) => { await save({ clip_shared: on }); toast(on ? 'Общий буфер обмена включён' : 'Общий буфер обмена выключен', 'ok'); }));
+      if (others.length < 2) {
+        box.replaceChildren(clipCard, h('div', { class: 'card', style: { marginTop: '14px' } }, h('h3', null, 'Управление друг другом'),
+          h('p', { class: 'muted' }, others.length ? 'Подключите ещё один ПК — тогда здесь можно будет разрешить им управлять друг другом.' : 'Пока к главному ПК не подключён ни один обычный ПК.')));
+        return;
+      }
+      const table = h('table', { class: 'tbl access' },
+        h('thead', null, h('tr', null, h('th', null, 'Кто управляет ↓ / кем →'), others.map((t) => h('th', { class: 'center' }, t.name)))),
+        h('tbody', null, others.map((from) => h('tr', null, h('th', null, from.name, from.online ? '' : h('span', { class: 'muted small' }, ' · не в сети')),
+          others.map((to) => {
+            if (to.id === from.id) return h('td', { class: 'center muted' }, '—');
+            const cb = h('input', { type: 'checkbox', checked: (grants[from.id] || []).includes(to.id), title: `${from.name} может управлять ${to.name}` });
+            cb.addEventListener('change', async () => {
+              const list = new Set(grants[from.id] || []);
+              cb.checked ? list.add(to.id) : list.delete(to.id);
+              try {
+                await save({ grants: { [from.id]: [...list] } });
+                grants[from.id] = [...list];
+                toast(cb.checked ? `${from.name} может управлять ${to.name}` : `${from.name} больше не может управлять ${to.name}`, 'ok');
+              } catch (e) { cb.checked = !cb.checked; toast(e.message, 'bad'); }
+            });
+            return h('td', { class: 'center' }, cb);
+          })))));
+      box.replaceChildren(clipCard, h('div', { class: 'card', style: { marginTop: '14px' } }, h('h3', null, 'Управление друг другом'),
+        h('div', { class: 'table-wrap' }, table),
+        h('p', { class: 'muted small', style: { marginTop: '10px' } }, 'Разрешённый ПК видит выбранные ПК на своей странице RandDesk (http://localhost:8420) и может открыть их рабочий стол, консоль и т. д. Главный ПК управляет всеми всегда.')));
+    };
+    load().catch((e) => toast(e.message, 'bad'));
+    return null;
+  }
+
   // поле кода 2FA для подтверждения важных действий
   const codeField = (label = 'Код из приложения (2FA)') => {
     const inp = h('input', { type: 'text', autocomplete: 'one-time-code', inputmode: 'numeric', placeholder: '123 456' });

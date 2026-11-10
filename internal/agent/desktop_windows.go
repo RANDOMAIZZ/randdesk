@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -86,18 +87,40 @@ func activeSessionID() (uint32, error) {
 }
 
 func startDesktopHelper(cfgPath, session, hub string) error {
+	_, err := startHelper([]string{"agent", "desktop-helper", "-config", cfgPath, "-session", session, "-hub", hub})
+	return err
+}
+
+// helperProc — запущенный процесс-помощник; done закрывается при его завершении.
+type helperProc struct {
+	session uint32
+	done    chan struct{}
+	kill    func()
+}
+
+func (h *helperProc) exited() bool {
+	select {
+	case <-h.done:
+		return true
+	default:
+		return false
+	}
+}
+
+// startHelper запускает этот же exe с аргументами в активном сеансе пользователя.
+func startHelper(args []string) (*helperProc, error) {
 	exe, err := os.Executable()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	args := []string{"agent", "desktop-helper", "-config", cfgPath, "-session", session, "-hub", hub}
+	hp := &helperProc{done: make(chan struct{})}
 
-	if currentSessionID() != 0 {
+	if cur := currentSessionID(); cur != 0 {
 		// агент запущен в сеансе пользователя (консольный режим) — обычный дочерний процесс
 		cmd := exec.Command(exe, args...)
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 		if err := cmd.Start(); err != nil {
-			return err
+			return nil, err
 		}
 		if j := helperJob(); j != 0 {
 			if h, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, uint32(cmd.Process.Pid)); err == nil {
@@ -105,28 +128,30 @@ func startDesktopHelper(cfgPath, session, hub string) error {
 				windows.CloseHandle(h)
 			}
 		}
-		go cmd.Wait()
-		return nil
+		hp.session = cur
+		hp.kill = func() { cmd.Process.Kill() }
+		go func() { cmd.Wait(); close(hp.done) }()
+		return hp, nil
 	}
 
 	// служба в сеансе 0: запускаем помощника от SYSTEM в активном сеансе пользователя —
 	// так доступен и обычный рабочий стол, и экран входа/UAC.
 	sid, err := activeSessionID()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var tok windows.Token
 	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_ALL_ACCESS, &tok); err != nil {
-		return err
+		return nil, err
 	}
 	defer tok.Close()
 	var dup windows.Token
 	if err := windows.DuplicateTokenEx(tok, windows.MAXIMUM_ALLOWED, nil, windows.SecurityImpersonation, windows.TokenPrimary, &dup); err != nil {
-		return err
+		return nil, err
 	}
 	defer dup.Close()
 	if err := windows.SetTokenInformation(dup, windows.TokenSessionId, (*byte)(unsafe.Pointer(&sid)), 4); err != nil {
-		return err
+		return nil, err
 	}
 	parts := make([]string, 0, len(args)+1)
 	for _, a := range append([]string{exe}, args...) {
@@ -139,12 +164,60 @@ func startDesktopHelper(cfgPath, session, hub string) error {
 	var pi windows.ProcessInformation
 	if err := windows.CreateProcessAsUser(dup, nil, cmdline, nil, nil, false,
 		windows.CREATE_NO_WINDOW|windows.CREATE_UNICODE_ENVIRONMENT, nil, nil, &si, &pi); err != nil {
-		return err
+		return nil, err
 	}
 	windows.CloseHandle(pi.Thread)
 	if j := helperJob(); j != 0 {
 		windows.AssignProcessToJobObject(j, pi.Process)
 	}
-	windows.CloseHandle(pi.Process)
-	return nil
+	hp.session = sid
+	proc := pi.Process
+	hp.kill = func() { windows.TerminateProcess(proc, 1) }
+	go func() {
+		windows.WaitForSingleObject(proc, windows.INFINITE)
+		windows.CloseHandle(proc)
+		close(hp.done)
+	}()
+	return hp, nil
+}
+
+// superviseSessionHelper держит помощник сеанса (буфер обмена, блокировка ввода)
+// запущенным в активном сеансе пользователя: перезапускает при выходе из системы,
+// смене пользователя и сбоях.
+func (a *Agent) superviseSessionHelper(stop <-chan struct{}) {
+	var hp *helperProc
+	defer func() {
+		if hp != nil && !hp.exited() {
+			hp.kill()
+		}
+	}()
+	fails := 0
+	for {
+		want, err := activeSessionID()
+		if currentSessionID() != 0 {
+			want, err = currentSessionID(), nil
+		}
+		if hp != nil && (hp.exited() || (err == nil && hp.session != want)) {
+			if !hp.exited() {
+				hp.kill()
+			}
+			hp = nil
+		}
+		if hp == nil && err == nil && a.cfg.path != "" {
+			p, serr := startHelper([]string{"agent", "session-helper", "-config", a.cfg.path, "-hub", a.current()})
+			if serr != nil {
+				fails++
+				if fails%20 == 1 {
+					log.Printf("помощник сеанса: %v", serr)
+				}
+			} else {
+				hp, fails = p, 0
+			}
+		}
+		select {
+		case <-stop:
+			return
+		case <-time.After(5 * time.Second):
+		}
+	}
 }

@@ -162,3 +162,6 @@ func showIndicator(text string) func() {
 		}
 	}
 }
+
+// ShowIndicator показывает плашку вверху экрана (не попадает в захват) и возвращает функцию, убирающую её.
+func ShowIndicator(text string) func() { return showIndicator(text) }

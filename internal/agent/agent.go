@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -23,6 +25,10 @@ type Agent struct {
 	cfg   *Config
 	stats *statsCollector
 	procs *procCache
+
+	// Session — держать в сеансе пользователя помощника (буфер обмена, блокировка ввода).
+	Session bool
+	online  atomic.Bool
 
 	mu  sync.Mutex // защищает cfg.Hubs и cur
 	cur string     // адрес хаба, через который установлено текущее соединение
@@ -73,6 +79,9 @@ func (c *conn) sendData(typ string, v any) error {
 
 // Run держит соединение с хабом до закрытия stop, переподключаясь при обрывах.
 func (a *Agent) Run(stop <-chan struct{}) {
+	if a.Session {
+		go a.superviseSessionHelper(stop)
+	}
 	backoff := time.Second
 	for {
 		start := time.Now()
@@ -135,103 +144,171 @@ func (a *Agent) dialURL(base, path string) (*websocket.Conn, error) {
 	return ws, nil
 }
 
+// connectPath подключается к пути на хабе, перебирая адреса по порядку.
+func (a *Agent) connectPath(path string) (*websocket.Conn, error) {
+	var last error = errors.New("не задан адрес хаба")
+	for _, u := range a.hubs() {
+		ws, err := a.dialURL(u, path)
+		if err == nil {
+			return ws, nil
+		}
+		last = err
+	}
+	return nil, last
+}
+
+// Online — есть ли сейчас связь с хабом.
+func (a *Agent) Online() bool { return a.online.Load() }
+
+// Current — адрес хаба, через который идёт связь.
+func (a *Agent) Current() string { return a.current() }
+
+// Config — конфигурация агента (адреса, отпечаток, токен устройства).
+func (a *Agent) Config() Config {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	c := *a.cfg
+	c.Hubs = append([]string(nil), c.Hubs...)
+	return c
+}
+
+// AddHubs добавляет найденные адреса хаба в начало списка (локальная сеть важнее).
+func (a *Agent) AddHubs(urls ...string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	list := a.cfg.hubList()
+	changed := false
+	for i := len(urls) - 1; i >= 0; i-- {
+		u := normalizeHub(urls[i], true)
+		found := false
+		for _, x := range list {
+			if x == u {
+				found = true
+			}
+		}
+		if !found {
+			list = append([]string{u}, list...)
+			changed = true
+		}
+	}
+	if !changed {
+		return
+	}
+	if len(list) > 8 {
+		list = list[:8]
+	}
+	a.cfg.setHubs(list)
+	if a.cfg.path != "" {
+		saveConfig(a.cfg.path, a.cfg)
+	}
+}
+
 // dial открывает поток через тот же адрес хаба, что и управляющее соединение.
 func (a *Agent) dial(path string) (*websocket.Conn, error) {
 	return a.dialURL(a.current(), path)
 }
 
-// connect перебирает адреса хаба по порядку (локальные — первыми) до первого успешного.
+// connect выбирает адрес хаба и открывает управляющее соединение.
+// Доступность всех адресов проверяется одновременно (только TCP), чтобы вне дома не ждать
+// таймаута каждого локального адреса. Соединение с хабом открывается одно — по самому
+// приоритетному доступному адресу: несколько соединений одного ПК хаб считал бы заменой друг друга.
 func (a *Agent) connect() (*websocket.Conn, error) {
 	hubs := a.hubs()
 	if len(hubs) == 0 {
 		return nil, errors.New("не задан адрес хаба")
 	}
-	// Пробуем все адреса одновременно: вне дома не ждём таймаута каждого локального адреса.
-	// Из успешных берём самый приоритетный (раньше в списке), но ждём его не дольше preferWait.
-	type result struct {
-		i   int
-		ws  *websocket.Conn
-		err error
-	}
-	const preferWait = 1500 * time.Millisecond
-	ch := make(chan result, len(hubs))
-	for i, u := range hubs {
-		go func(i int, u string) {
-			ws, err := a.dialURL(u, "/api/agent/ws")
-			ch <- result{i, ws, err}
-		}(i, u)
-	}
-	res := make([]*result, len(hubs))
-	best := -1
-	var deadline <-chan time.Time
-	pending := len(hubs)
-	// done: решено, если лучший найден и все более приоритетные завершились
-	done := func() bool {
-		if best < 0 {
-			return false
-		}
-		for j := 0; j < best; j++ {
-			if res[j] == nil {
-				return false
-			}
-		}
-		return true
-	}
-	for pending > 0 && !done() {
-		select {
-		case r := <-ch:
-			pending--
-			res[r.i] = &r
-			if r.err == nil && (best < 0 || r.i < best) {
-				if best >= 0 {
-					res[best].ws.Close()
-				}
-				best = r.i
-				if deadline == nil {
-					deadline = time.After(preferWait)
-				}
-			} else if r.err == nil {
-				r.ws.Close()
-			}
-		case <-deadline:
-			pending = 0
-		}
-	}
-	// опоздавшие соединения закрываем
-	go func(left int) {
-		for ; left > 0; left-- {
-			if r := <-ch; r.err == nil {
-				r.ws.Close()
-			}
-		}
-	}(len(hubs) - countDone(res))
-	if best >= 0 {
-		a.mu.Lock()
-		a.cur = hubs[best]
-		a.mu.Unlock()
-		return res[best].ws, nil
-	}
+	order := reachableOrder(hubs)
 	var errs []string
-	for i, r := range res {
-		if r == nil {
-			continue
+	for _, i := range order {
+		u := hubs[i]
+		ws, err := a.dialURL(u, "/api/agent/ws")
+		if err == nil {
+			a.mu.Lock()
+			a.cur = u
+			a.mu.Unlock()
+			return ws, nil
 		}
-		if errors.Is(r.err, errUnauthorized) {
-			return nil, r.err
+		if errors.Is(err, errUnauthorized) {
+			return nil, err
 		}
-		errs = append(errs, hubs[i]+": "+r.err.Error())
+		errs = append(errs, u+": "+err.Error())
+	}
+	if len(errs) == 0 {
+		errs = append(errs, "ни один адрес хаба не отвечает: "+strings.Join(hubs, ", "))
 	}
 	return nil, errors.New(strings.Join(errs, "; "))
 }
 
-func countDone[T any](s []*T) int {
-	n := 0
-	for _, v := range s {
-		if v != nil {
-			n++
+// reachableOrder возвращает индексы адресов, до которых удалось установить TCP-соединение,
+// по порядку приоритета. Более приоритетные ждём не дольше 1,5 с после первого ответившего.
+func reachableOrder(hubs []string) []int {
+	const preferWait = 1500 * time.Millisecond
+	ch := make(chan int, len(hubs))
+	for i, u := range hubs {
+		go func(i int, u string) {
+			host := u
+			if p, err := url.Parse(u); err == nil && p.Host != "" {
+				host = p.Host
+				if p.Port() == "" {
+					if p.Scheme == "https" {
+						host += ":443"
+					} else {
+						host += ":80"
+					}
+				}
+			}
+			c, err := netDialer.Dial("tcp", host)
+			if err != nil {
+				ch <- -1 - i
+				return
+			}
+			c.Close()
+			ch <- i
+		}(i, u)
+	}
+	ok := make([]bool, len(hubs))
+	done := make([]bool, len(hubs))
+	var deadline <-chan time.Time
+	for left := len(hubs); left > 0; {
+		select {
+		case r := <-ch:
+			left--
+			if r >= 0 {
+				ok[r], done[r] = true, true
+				if deadline == nil {
+					deadline = time.After(preferWait)
+				}
+			} else {
+				done[-1-r] = true
+			}
+			// лучший доступный найден, а все более приоритетные уже ответили — дальше не ждём
+			best := -1
+			for i := range ok {
+				if ok[i] {
+					best = i
+					break
+				}
+			}
+			if best >= 0 {
+				all := true
+				for i := 0; i < best; i++ {
+					all = all && done[i]
+				}
+				if all {
+					left = 0
+				}
+			}
+		case <-deadline:
+			left = 0
 		}
 	}
-	return n
+	var order []int
+	for i := range ok {
+		if ok[i] {
+			order = append(order, i)
+		}
+	}
+	return order
 }
 
 // updateHubs принимает от хаба актуальный список адресов (по уже проверенному соединению)
@@ -281,6 +358,8 @@ func (a *Agent) session(stop <-chan struct{}) error {
 		return err
 	}
 	defer ws.Close()
+	a.online.Store(true)
+	defer a.online.Store(false)
 	c := &conn{ws: ws}
 	log.Printf("подключено к хабу %s", a.current())
 
@@ -413,6 +492,12 @@ func (a *Agent) dispatch(method string, data json.RawMessage) (any, error) {
 		}
 		log.Printf("команда питания: %s", r.Action)
 		return ok, power(r.Action)
+	case "gamepad":
+		r, err := decode[proto.GamepadReq](data)
+		if err != nil {
+			return nil, err
+		}
+		return ok, setGamepads(r.Disable)
 	case "wol":
 		r, err := decode[proto.WolReq](data)
 		if err != nil {

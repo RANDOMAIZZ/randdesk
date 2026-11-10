@@ -3,7 +3,7 @@ package proto
 
 import "encoding/json"
 
-const Version = "0.2.1"
+const Version = "0.3.0"
 
 // Типы сообщений в управляющем WebSocket-канале агента.
 const (
@@ -133,6 +133,24 @@ type TermControl struct {
 // HubList — адреса хаба в порядке предпочтения (сначала локальные).
 type HubList struct {
 	URLs []string `json:"urls"`
+}
+
+type GamepadReq struct {
+	Disable bool `json:"disable"`
+}
+
+// SessionState — хаб -> помощник сеанса: что заблокировать и участвовать ли в общем буфере.
+type SessionState struct {
+	Type      string `json:"type"` // state
+	Keyboard  bool   `json:"keyboard"`
+	Mouse     bool   `json:"mouse"`
+	Clipboard bool   `json:"clipboard"`
+}
+
+// SessionMsg — сообщения помощника сеанса (буфер обмена).
+type SessionMsg struct {
+	Type string `json:"type"` // clip
+	Text string `json:"text,omitempty"`
 }
 
 type EnrollReq struct {

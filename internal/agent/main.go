@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -86,6 +87,24 @@ func Main(args []string) {
 		}
 		runDesktopHelper(cfg, *sessionID)
 		return
+	case "session-helper":
+		cfg, err := loadConfig(*cfgPath)
+		if err != nil {
+			ui.Fatalf("конфигурация %s: %v", *cfgPath, err)
+		}
+		cfg.path = *cfgPath
+		if *hubURL != "" {
+			pref := normalizeHub(*hubURL, cfg.Fingerprint != "")
+			hubs := []string{pref}
+			for _, u := range cfg.hubList() {
+				if u != pref {
+					hubs = append(hubs, u)
+				}
+			}
+			cfg.Hubs = hubs
+		}
+		runSessionHelper(cfg)
+		return
 	case "console":
 		cfg := ensureConfig(*cfgPath, *hubURL, *key, fp)
 		runConsole(cfg)
@@ -105,6 +124,28 @@ func Main(args []string) {
 		os.Exit(2)
 	}
 }
+
+// LoadConfigFile загружает конфигурацию агента и запоминает её путь (для сохранения изменений).
+func LoadConfigFile(path string) (*Config, error) {
+	c, err := loadConfig(path)
+	if err != nil {
+		return nil, err
+	}
+	c.path = path
+	return c, nil
+}
+
+// SaveConfigFile сохраняет конфигурацию агента с защитой доступа (SYSTEM и администраторы).
+func SaveConfigFile(path string, c *Config) error {
+	c.path = path
+	return saveConfig(path, c)
+}
+
+// TLSConfig — проверка хаба по закреплённому отпечатку.
+func TLSConfig(fp string) *tls.Config { return tlsConfig(fp) }
+
+// ProtectFile оставляет доступ к файлу только SYSTEM и администраторам.
+func ProtectFile(path string) { protectFile(path) }
 
 func loadConfig(path string) (*Config, error) {
 	b, err := os.ReadFile(path)
