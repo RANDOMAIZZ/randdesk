@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"randdesk/internal/proto"
+	"randdesk/internal/ui"
 )
 
 func Main(args []string) {
@@ -28,22 +29,22 @@ func Main(args []string) {
 	switch *httpPolicy {
 	case "lan", "all", "off":
 	default:
-		log.Fatalf("неверный -http %q: допустимо lan, all, off", *httpPolicy)
+		ui.Fatalf("неверный -http %q: допустимо lan, all, off", *httpPolicy)
 	}
 	if err := os.MkdirAll(*dataDir, 0o700); err != nil {
-		log.Fatalf("не удалось создать папку данных: %v", err)
+		ui.Fatalf("не удалось создать папку данных: %v", err)
 	}
 	store, err := OpenStore(filepath.Join(*dataDir, "hub.json"))
 	if err != nil {
-		log.Fatalf("хранилище: %v", err)
+		ui.Fatalf("хранилище: %v", err)
 	}
 	audit, err := OpenAudit(filepath.Join(*dataDir, "audit.jsonl"))
 	if err != nil {
-		log.Fatalf("журнал: %v", err)
+		ui.Fatalf("журнал: %v", err)
 	}
 	_, portStr, err := net.SplitHostPort(*listen)
 	if err != nil {
-		log.Fatalf("неверный -listen: %v", err)
+		ui.Fatalf("неверный -listen: %v", err)
 	}
 	port, _ := strconv.Atoi(portStr)
 
@@ -51,14 +52,14 @@ func Main(args []string) {
 	fingerprint := ""
 	if *certFile != "" {
 		if cert, err = tls.LoadX509KeyPair(*certFile, *keyFile); err != nil {
-			log.Fatalf("TLS-сертификат: %v", err)
+			ui.Fatalf("TLS-сертификат: %v", err)
 		}
 	} else {
 		if cert, err = loadOrCreateCert(*dataDir); err != nil {
-			log.Fatalf("самоподписанный сертификат: %v", err)
+			ui.Fatalf("самоподписанный сертификат: %v", err)
 		}
 		if fingerprint, err = spkiFingerprint(cert); err != nil {
-			log.Fatalf("отпечаток сертификата: %v", err)
+			ui.Fatalf("отпечаток сертификата: %v", err)
 		}
 	}
 
@@ -81,7 +82,11 @@ func Main(args []string) {
 
 	ln, err := net.Listen("tcp", *listen)
 	if err != nil {
-		log.Fatal(err)
+		ui.Fatalf("не удалось занять порт %s: %v\nВозможно, хаб уже запущен (проверьте http://localhost:%s) или порт занят другой программой.", portStr, err, portStr)
+	}
+	if ui.OwnConsole() {
+		log.Printf("хаб работает — не закрывайте это окно (закрытие окна остановит хаб)")
+		ui.OpenBrowser("http://localhost:" + portStr)
 	}
 	tlsL, plainL := splitListener(ln)
 	handler := srv.Handler()
@@ -106,8 +111,8 @@ func Main(args []string) {
 		srv.net.shutdown()
 		os.Exit(0)
 	}()
-	go func() { log.Fatal(hsPlain.Serve(plainL)) }()
-	log.Fatal(hsTLS.ServeTLS(tlsL, "", ""))
+	go func() { ui.Fatal(hsPlain.Serve(plainL)) }()
+	ui.Fatal(hsTLS.ServeTLS(tlsL, "", ""))
 }
 
 func defaultDataDir() string {

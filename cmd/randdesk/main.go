@@ -7,6 +7,7 @@ import (
 	"randdesk/internal/agent"
 	"randdesk/internal/hub"
 	"randdesk/internal/proto"
+	"randdesk/internal/ui"
 )
 
 func usage() {
@@ -24,6 +25,10 @@ func usage() {
 
 func main() {
 	if len(os.Args) < 2 {
+		if ui.OwnConsole() { // запуск двойным щелчком — показываем меню, а не исчезающую справку
+			menu()
+			return
+		}
 		usage()
 		os.Exit(2)
 	}

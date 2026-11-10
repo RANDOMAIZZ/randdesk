@@ -18,6 +18,7 @@ import (
 	"github.com/kardianos/service"
 
 	"randdesk/internal/proto"
+	"randdesk/internal/ui"
 )
 
 type Config struct {
@@ -63,14 +64,14 @@ func Main(args []string) {
 	}
 	fp, err := normFingerprint(*fpFlag)
 	if err != nil {
-		log.Fatal(err)
+		ui.Fatal(err)
 	}
 
 	switch sub {
 	case "desktop-helper":
 		cfg, err := loadConfig(*cfgPath)
 		if err != nil {
-			log.Fatalf("конфигурация %s: %v", *cfgPath, err)
+			ui.Fatalf("конфигурация %s: %v", *cfgPath, err)
 		}
 		cfg.path = *cfgPath
 		if *hubURL != "" { // адрес, через который сейчас подключён агент, — первым
@@ -93,7 +94,7 @@ func Main(args []string) {
 		runService(cfg, *cfgPath)
 	case "install":
 		if !isElevated() {
-			log.Fatal("установка службы требует прав администратора: запустите PowerShell от имени администратора")
+			ui.Fatal("установка службы требует прав администратора: запустите PowerShell от имени администратора")
 		}
 		cfg := ensureConfig(*cfgPath, *hubURL, *key, fp)
 		installService(cfg, *cfgPath)
@@ -139,7 +140,7 @@ func ensureConfig(path, hubArg, key, fp string) *Config {
 func ensureConfigInner(path, hubArg, key, fp string) *Config {
 	cfg, err := loadConfig(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		log.Fatalf("не удалось прочитать %s: %v", path, err)
+		ui.Fatalf("не удалось прочитать %s: %v", path, err)
 	}
 	if fp == "" && cfg != nil && key == "" {
 		fp = cfg.Fingerprint
@@ -150,7 +151,7 @@ func ensureConfigInner(path, hubArg, key, fp string) *Config {
 			hubs = cfg.hubList()
 		}
 		if len(hubs) == 0 {
-			log.Fatal("укажите адрес хаба: -hub https://IP:8420")
+			ui.Fatal("укажите адрес хаба: -hub https://IP:8420")
 		}
 		var resp *proto.EnrollResp
 		var errs []string
@@ -161,12 +162,12 @@ func ensureConfigInner(path, hubArg, key, fp string) *Config {
 			errs = append(errs, u+": "+err.Error())
 		}
 		if resp == nil {
-			log.Fatalf("привязка не удалась:\n  %s", strings.Join(errs, "\n  "))
+			ui.Fatalf("привязка не удалась:\n  %s", strings.Join(errs, "\n  "))
 		}
 		cfg = &Config{Fingerprint: fp, DeviceID: resp.DeviceID, Token: resp.Token}
 		cfg.setHubs(hubs)
 		if err := saveConfig(path, cfg); err != nil {
-			log.Fatalf("не удалось сохранить конфигурацию: %v", err)
+			ui.Fatalf("не удалось сохранить конфигурацию: %v", err)
 		}
 		log.Printf("ПК привязан к хабу %s (id %s), конфигурация: %s", strings.Join(hubs, ", "), cfg.DeviceID, path)
 		if fp == "" {
@@ -180,7 +181,7 @@ func ensureConfigInner(path, hubArg, key, fp string) *Config {
 		return cfg
 	}
 	if cfg == nil {
-		log.Fatalf("ПК ещё не привязан: укажите -hub и -key (конфигурация %s не найдена)", path)
+		ui.Fatalf("ПК ещё не привязан: укажите -hub и -key (конфигурация %s не найдена)", path)
 	}
 	changed := false
 	if len(hubs) > 0 && strings.Join(hubs, ",") != strings.Join(cfg.hubList(), ",") {
@@ -193,7 +194,7 @@ func ensureConfigInner(path, hubArg, key, fp string) *Config {
 	}
 	if changed {
 		if err := saveConfig(path, cfg); err != nil {
-			log.Fatalf("не удалось сохранить конфигурацию: %v", err)
+			ui.Fatalf("не удалось сохранить конфигурацию: %v", err)
 		}
 		log.Printf("адреса хаба обновлены: %s", strings.Join(cfg.hubList(), ", "))
 	}
@@ -282,7 +283,7 @@ func runService(cfg *Config, cfgPath string) {
 	prg := &program{cfg: cfg}
 	s, err := service.New(prg, serviceConfig(cfgPath, ""))
 	if err != nil {
-		log.Fatal(err)
+		ui.Fatal(err)
 	}
 	if service.Interactive() {
 		runConsole(cfg)
@@ -291,7 +292,7 @@ func runService(cfg *Config, cfgPath string) {
 	setupServiceLog()
 	log.Printf("служба RandDesk agent %s запущена, хаб %s", proto.Version, strings.Join(cfg.hubList(), ", "))
 	if err := s.Run(); err != nil {
-		log.Fatal(err)
+		ui.Fatal(err)
 	}
 }
 
@@ -310,7 +311,7 @@ func installService(cfg *Config, cfgPath string) {
 	dst := filepath.Join(os.Getenv("ProgramFiles"), "RandDesk", "randdesk.exe")
 	s, err := service.New(&program{cfg: cfg}, serviceConfig(cfgPath, dst))
 	if err != nil {
-		log.Fatal(err)
+		ui.Fatal(err)
 	}
 	if st, err := s.Status(); err == nil && st != service.StatusUnknown {
 		s.Stop()
@@ -321,32 +322,34 @@ func installService(cfg *Config, cfgPath string) {
 	}
 	self, err := os.Executable()
 	if err != nil {
-		log.Fatal(err)
+		ui.Fatal(err)
 	}
 	if !strings.EqualFold(filepath.Clean(self), filepath.Clean(dst)) {
 		if err := copyFile(self, dst); err != nil {
-			log.Fatalf("копирование в %s: %v", dst, err)
+			ui.Fatalf("копирование в %s: %v", dst, err)
 		}
 	}
 	if err := s.Install(); err != nil {
-		log.Fatalf("установка службы: %v", err)
+		ui.Fatalf("установка службы: %v", err)
 	}
 	if err := s.Start(); err != nil {
-		log.Fatalf("запуск службы: %v", err)
+		ui.Fatalf("запуск службы: %v", err)
 	}
 	log.Printf("служба RandDeskAgent установлена и запущена (%s)", dst)
+	ui.Pause()
 }
 
 func uninstallService() {
 	s, err := service.New(&program{}, serviceConfig(defaultConfigPath(), ""))
 	if err != nil {
-		log.Fatal(err)
+		ui.Fatal(err)
 	}
 	s.Stop()
 	if err := s.Uninstall(); err != nil {
-		log.Fatalf("удаление службы: %v", err)
+		ui.Fatalf("удаление службы: %v", err)
 	}
 	log.Print("служба RandDeskAgent удалена")
+	ui.Pause()
 }
 
 func copyFile(src, dst string) error {
