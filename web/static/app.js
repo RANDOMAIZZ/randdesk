@@ -145,11 +145,11 @@
     return () => { stopped = true; clearTimeout(t); };
   }
 
-  function toast(msg, kind = '') {
+  function toast(msg, kind = '', ms = 4300) {
     const el = h('div', { class: 'toast ' + kind }, msg);
     document.getElementById('toasts').append(el);
-    setTimeout(() => el.classList.add('out'), 3800);
-    setTimeout(() => el.remove(), 4300);
+    setTimeout(() => el.classList.add('out'), ms - 500);
+    setTimeout(() => el.remove(), ms);
   }
 
   async function copyText(text) {
@@ -446,7 +446,15 @@
   async function wake(d) {
     try {
       const r = await api('POST', `/api/devices/${enc(d.id)}/wake`);
-      toast(`Magic-пакет отправлен на ${r.macs.join(', ')} (ретрансляторов: ${r.relays})`, 'ok');
+      const lan = r.lan_relays || [];
+      if (lan.length) {
+        toast(`Magic-пакет отправлен на ${r.macs.join(', ')} через ${lan.join(', ')} (в одной сети с ${d.name}). ПК должен включиться в течение минуты.`, 'ok');
+      } else {
+        const nets = [...new Set((r.target_ips || []).map(ip => ip.replace(/\.\d+$/, '.x')))].join(', ');
+        toast(`Magic-пакет отправлен на ${r.macs.join(', ')}, но в сети ${d.name}${nets ? ' (' + nets + ')' : ''} сейчас нет включённого ПК с RANDSEC. ` +
+          'Пакет послан напрямую на последний адрес ПК — дойдёт, только если маршрутизатор его пропустит. ' +
+          'Надёжно: держите включённым любой другой ПК с RANDSEC в той же сети.', 'warn', 12000);
+      }
     } catch (e) { toast(e.message, 'bad'); }
   }
 

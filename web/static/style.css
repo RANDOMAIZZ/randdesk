@@ -305,6 +305,7 @@ pre.recovery { background: var(--bg); border: 1px solid var(--border); border-ra
 .toast { background: var(--panel2); border: 1px solid var(--border); border-left: 3px solid var(--accent); padding: 10px 14px; border-radius: 8px; box-shadow: var(--shadow); transition: opacity .4s, transform .4s; max-width: 380px; }
 .toast.ok { border-left-color: var(--ok); }
 .toast.bad { border-left-color: var(--bad); }
+.toast.warn { border-left-color: var(--warn); }
 .toast.out { opacity: 0; transform: translateY(6px); }
 
 /* ---------- мобильные ---------- */

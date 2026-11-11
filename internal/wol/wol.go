@@ -4,10 +4,14 @@ package wol
 import (
 	"fmt"
 	"net"
+	"strings"
 )
 
-// Send рассылает magic-пакет для MAC во все локальные широковещательные адреса.
-func Send(mac string) error {
+// Send рассылает magic-пакет для MAC во все локальные широковещательные адреса, а также на
+// последние известные адреса выключенного ПК (hints) и широковещательные адреса их подсетей /24 —
+// так пакет может дойти и через маршрутизатор, если тот ещё помнит MAC по IP или пропускает
+// направленную рассылку.
+func Send(mac string, hints ...string) error {
 	hw, err := net.ParseMAC(mac)
 	if err != nil || len(hw) != 6 {
 		return fmt.Errorf("неверный MAC-адрес %q", mac)
@@ -28,7 +32,7 @@ func Send(mac string) error {
 
 	sent := 0
 	var lastErr error
-	for _, target := range broadcastAddrs() {
+	for _, target := range targets(hints) {
 		for _, port := range []int{9, 7} {
 			addr := &net.UDPAddr{IP: target, Port: port}
 			if _, err := conn.WriteTo(pkt, addr); err != nil {
@@ -44,6 +48,55 @@ func Send(mac string) error {
 	return nil
 }
 
+func targets(hints []string) []net.IP {
+	out := broadcastAddrs()
+	seen := map[string]bool{}
+	for _, ip := range out {
+		seen[ip.String()] = true
+	}
+	add := func(ip net.IP) {
+		if !seen[ip.String()] {
+			seen[ip.String()] = true
+			out = append(out, ip)
+		}
+	}
+	for _, h := range hints {
+		ip := net.ParseIP(strings.TrimSpace(h)).To4()
+		if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() || !ip.IsPrivate() {
+			continue
+		}
+		add(ip)
+		add(net.IPv4(ip[0], ip[1], ip[2], 255).To4())
+	}
+	return out
+}
+
+// SameLAN сообщает, есть ли у двух наборов адресов общая частная подсеть /24
+// (виртуальные сети ZeroTier и т. п. не в счёт — через них magic-пакет не проходит).
+func SameLAN(a, b []string) bool {
+	nets := map[string]bool{}
+	for _, s := range a {
+		if k := lanKey(s); k != "" {
+			nets[k] = true
+		}
+	}
+	for _, s := range b {
+		if k := lanKey(s); k != "" && nets[k] {
+			return true
+		}
+	}
+	return false
+}
+
+func lanKey(s string) string {
+	ip := net.ParseIP(strings.TrimSpace(s)).To4()
+	if ip == nil || !ip.IsPrivate() {
+		return ""
+	}
+	return fmt.Sprintf("%d.%d.%d", ip[0], ip[1], ip[2])
+}
+
+// broadcastAddrs — общая рассылка и широковещательные адреса всех поднятых интерфейсов.
 func broadcastAddrs() []net.IP {
 	out := []net.IP{net.IPv4bcast}
 	ifs, err := net.Interfaces()

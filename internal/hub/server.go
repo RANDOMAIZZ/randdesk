@@ -552,29 +552,45 @@ func (s *Server) hWake(w http.ResponseWriter, r *http.Request) {
 	}
 	var macs []string
 	for _, n := range d.Info.NICs {
-		if n.MAC != "" {
+		if n.MAC != "" && !virtualNIC(n) {
 			macs = append(macs, n.MAC)
+		}
+	}
+	if len(macs) == 0 {
+		for _, n := range d.Info.NICs { // только виртуальные — пробуем хоть их
+			if n.MAC != "" {
+				macs = append(macs, n.MAC)
+			}
 		}
 	}
 	if len(macs) == 0 {
 		jsonErr(w, 400, "MAC-адрес устройства неизвестен (агент ещё ни разу не подключался)")
 		return
 	}
+	targetIPs := lanIPs(d.Info.NICs)
 	sent := 0
 	for _, m := range macs {
-		if wol.Send(m) == nil {
+		if wol.Send(m, targetIPs...) == nil {
 			sent++
 		}
 	}
-	// ретрансляция через другие агенты в сети — они могут быть в одной локалке с целевым ПК
+	// ретрансляция через другие агенты — те, что в одной локалке с целевым ПК, разбудят его наверняка
 	s.mu.Lock()
 	var relays []*agentConn
+	var relayIDs []string
 	for aid, ac := range s.agents {
 		if aid != id {
 			relays = append(relays, ac)
+			relayIDs = append(relayIDs, aid)
 		}
 	}
 	s.mu.Unlock()
+	var lanNames []string
+	for _, aid := range relayIDs {
+		if rd, ok := s.store.Device(aid); ok && wol.SameLAN(lanIPs(rd.Info.NICs), targetIPs) {
+			lanNames = append(lanNames, rd.Name)
+		}
+	}
 	var relayed atomic.Int32
 	var wg sync.WaitGroup
 	for _, ac := range relays {
@@ -585,7 +601,7 @@ func (s *Server) hWake(w http.ResponseWriter, r *http.Request) {
 			defer cancel()
 			okAny := false
 			for _, m := range macs {
-				b, _ := json.Marshal(proto.WolReq{MAC: m})
+				b, _ := json.Marshal(proto.WolReq{MAC: m, IPs: targetIPs})
 				if _, err := ac.call(ctx, "wol", b); err == nil {
 					okAny = true
 				}
@@ -597,7 +613,36 @@ func (s *Server) hWake(w http.ResponseWriter, r *http.Request) {
 	}
 	wg.Wait()
 	s.audit.Log(userOf(r), clientIP(r), d.Name, "wake", strings.Join(macs, ", "))
-	writeJSON(w, 200, map[string]any{"macs": macs, "hub_sent": sent > 0, "relays": relayed.Load()})
+	writeJSON(w, 200, map[string]any{
+		"macs": macs, "hub_sent": sent > 0, "relays": relayed.Load(),
+		"lan_relays": lanNames, "target_ips": targetIPs,
+	})
+}
+
+// virtualNIC — адаптеры VPN и виртуальных машин: magic-пакет через них не будит ПК.
+// Узнаём по «локально назначенному» MAC (так делают ZeroTier, Radmin, VirtualBox, Hyper-V…) и по имени.
+func virtualNIC(n proto.NIC) bool {
+	if hw, err := net.ParseMAC(n.MAC); err == nil && len(hw) > 0 && hw[0]&0x02 != 0 {
+		return true
+	}
+	l := strings.ToLower(n.Name)
+	for _, k := range []string{"zerotier", "radmin", "tailscale", "vpn", "virtualbox", "vmware", "hyper-v", "vethernet", "wsl", "docker", "loopback", "tun", "tap"} {
+		if strings.Contains(l, k) {
+			return true
+		}
+	}
+	return false
+}
+
+// lanIPs — адреса ПК в настоящих (не виртуальных) сетях.
+func lanIPs(nics []proto.NIC) []string {
+	var out []string
+	for _, n := range nics {
+		if !virtualNIC(n) {
+			out = append(out, n.IPs...)
+		}
+	}
+	return out
 }
 
 // ---------- терминал ----------

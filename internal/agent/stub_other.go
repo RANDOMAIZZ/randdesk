@@ -28,6 +28,7 @@ func power(string) error                                      { return errUnsupp
 func runTerminal(*websocket.Conn, proto.StreamOpen)           {}
 func isElevated() bool                                        { return false }
 func startDesktopHelper(string, string, string, string) error { return errUnsupported }
+func prepareWake()                                            {}
 func setGamepads(bool) error                                  { return errUnsupported }
 func runSessionHelper(*Config)                                {}
 func (a *Agent) superviseSessionHelper(<-chan struct{})       {}

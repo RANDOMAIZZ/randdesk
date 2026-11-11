@@ -79,6 +79,7 @@ func (c *conn) sendData(typ string, v any) error {
 
 // Run держит соединение с хабом до закрытия stop, переподключаясь при обрывах.
 func (a *Agent) Run(stop <-chan struct{}) {
+	go prepareWake()
 	if a.Session {
 		go a.superviseSessionHelper(stop)
 	}
@@ -534,7 +535,7 @@ func (a *Agent) dispatch(method string, data json.RawMessage) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		return ok, wol.Send(r.MAC)
+		return ok, wol.Send(r.MAC, r.IPs...)
 	}
 	return nil, fmt.Errorf("неизвестный метод %q", method)
 }

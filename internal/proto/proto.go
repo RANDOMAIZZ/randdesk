@@ -111,7 +111,8 @@ type PowerReq struct {
 }
 
 type WolReq struct {
-	MAC string `json:"mac"`
+	MAC string   `json:"mac"`
+	IPs []string `json:"ips,omitempty"` // последние известные адреса выключенного ПК
 }
 
 type StreamOpen struct {
