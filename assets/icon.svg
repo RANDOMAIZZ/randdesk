@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Иконка RANDSEC: монитор с курсором на градиентной плашке, зелёная точка — «на связи». -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4f8dff"/>
+      <stop offset=".52" stop-color="#7d6bff"/>
+      <stop offset="1" stop-color="#c25ff0"/>
+    </linearGradient>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity=".28"/>
+      <stop offset=".5" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="screen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity=".26"/>
+      <stop offset="1" stop-color="#fff" stop-opacity=".08"/>
+    </linearGradient>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="6" stdDeviation="7" flood-color="#2a1a6e" flood-opacity=".35"/>
+    </filter>
+  </defs>
+  <rect width="256" height="256" rx="58" fill="url(#bg)"/>
+  <rect width="256" height="256" rx="58" fill="url(#gloss)"/>
+  <g filter="url(#sh)">
+    <!-- монитор -->
+    <rect x="44" y="62" width="168" height="112" rx="18" fill="url(#screen)" stroke="#fff" stroke-width="15"/>
+    <path d="M128 182v18" stroke="#fff" stroke-width="15" stroke-linecap="round"/>
+    <path d="M94 206h68" stroke="#fff" stroke-width="15" stroke-linecap="round"/>
+    <!-- курсор -->
+    <path d="M110 86 L110 152 L126 137 L138 163 L150 157.5 L138 132 L160 132 Z"
+          fill="#fff" stroke="#fff" stroke-width="4" stroke-linejoin="round"/>
+  </g>
+  <!-- на связи -->
+  <circle cx="206" cy="58" r="25" fill="#34d27b" stroke="#fff" stroke-width="10"/>
+</svg>

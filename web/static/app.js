@@ -62,8 +62,10 @@
     s.setAttribute('viewBox', '0 0 32 32');
     s.setAttribute('class', 'logo');
     const id = 'lg' + Math.random().toString(36).slice(2, 8);
-    s.innerHTML = `<defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5b93ff"/><stop offset=".55" stop-color="#8b6cff"/><stop offset="1" stop-color="#c06cf0"/></linearGradient></defs>`
-      + `<rect width="32" height="32" rx="9" fill="url(#${id})"/><rect x="7" y="9" width="18" height="12" rx="2.5" fill="none" stroke="#fff" stroke-width="2.4"/><path d="M12 25h8" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/><circle cx="24.5" cy="8.5" r="3.2" fill="#3fd07a" stroke="#fff" stroke-width="1.5"/>`;
+    s.innerHTML = `<defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4f8dff"/><stop offset=".52" stop-color="#7d6bff"/><stop offset="1" stop-color="#c25ff0"/></linearGradient></defs>`
+      + `<rect width="32" height="32" rx="7.5" fill="url(#${id})"/><rect x="5.5" y="8" width="21" height="14" rx="2.5" fill="#fff" fill-opacity=".18" stroke="#fff" stroke-width="2.4"/>`
+      + `<path d="M11 26.5h10" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/><path d="M13.6 11v8.4l2.1-1.9 1.5 3.2 1.6-.7-1.5-3.2h2.8z" fill="#fff" stroke="#fff" stroke-width=".7" stroke-linejoin="round"/>`
+      + `<circle cx="25.8" cy="7" r="3.6" fill="#34d27b" stroke="#fff" stroke-width="1.5"/>`;
     return s;
   }
 

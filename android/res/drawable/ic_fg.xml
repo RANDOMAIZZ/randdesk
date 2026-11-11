@@ -1,10 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Монитор с курсором: 108×108, значимая часть — центральные 72×72. -->
+<!-- Рисунок иконки: монитор с курсором и зелёная точка «на связи». Координаты — из
+     assets/icon.svg (256×256), уменьшены и поставлены в безопасную зону 66×66 в центре. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#00000000" android:strokeColor="#5B8CFF" android:strokeWidth="4"
-        android:pathData="M32,36 h44 a4,4 0 0 1 4,4 v26 a4,4 0 0 1 -4,4 h-44 a4,4 0 0 1 -4,-4 v-26 a4,4 0 0 1 4,-4 z" />
-    <path android:fillColor="#5B8CFF" android:pathData="M46,74 h16 v4 h-16 z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M50,44 L50,62 L54.5,57.5 L58,65 L61,63.6 L57.6,56.3 L64,56 Z" />
+    <group android:scaleX="0.29" android:scaleY="0.29"
+        android:translateX="13.8" android:translateY="19.7">
+        <!-- экран -->
+        <path android:fillColor="#33FFFFFF" android:strokeColor="#FFFFFFFF" android:strokeWidth="15"
+            android:pathData="M62,62 H194 A18,18 0 0 1 212,80 V156 A18,18 0 0 1 194,174 H62 A18,18 0 0 1 44,156 V80 A18,18 0 0 1 62,62 Z" />
+        <!-- подставка -->
+        <path android:strokeColor="#FFFFFFFF" android:strokeWidth="15" android:strokeLineCap="round"
+            android:pathData="M128,182 V200 M94,206 H162" />
+        <!-- курсор -->
+        <path android:fillColor="#FFFFFFFF" android:strokeColor="#FFFFFFFF" android:strokeWidth="4"
+            android:strokeLineJoin="round"
+            android:pathData="M110,86 L110,152 L126,137 L138,163 L150,157.5 L138,132 L160,132 Z" />
+        <!-- на связи -->
+        <path android:fillColor="#FF34D27B" android:strokeColor="#FFFFFFFF" android:strokeWidth="10"
+            android:pathData="M206,33 A25,25 0 1 1 205.99,33 Z" />
+    </group>
 </vector>

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- Иконка RANDSEC для размеров 16–32 px: те же формы, толще линии, без мелких деталей. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4f8dff"/>
+      <stop offset=".52" stop-color="#7d6bff"/>
+      <stop offset="1" stop-color="#c25ff0"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="7.5" fill="url(#bg)"/>
+  <rect x="5.5" y="8" width="21" height="14" rx="2.5" fill="#fff" fill-opacity=".18" stroke="#fff" stroke-width="2.4"/>
+  <path d="M11 26.5h10" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>
+  <path d="M13.6 11 L13.6 19.4 L15.7 17.5 L17.2 20.7 L18.8 20 L17.3 16.8 L20.1 16.8 Z" fill="#fff" stroke="#fff" stroke-width=".7" stroke-linejoin="round"/>
+  <circle cx="25.8" cy="7" r="3.6" fill="#34d27b" stroke="#fff" stroke-width="1.5"/>
+</svg>

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Одноцветный слой для тематических иконок Android 13+: тот же рисунок, цвет задаёт система. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <group android:scaleX="0.29" android:scaleY="0.29"
+        android:translateX="13.8" android:translateY="19.7">
+        <path android:strokeColor="#FFFFFFFF" android:strokeWidth="15"
+            android:pathData="M62,62 H194 A18,18 0 0 1 212,80 V156 A18,18 0 0 1 194,174 H62 A18,18 0 0 1 44,156 V80 A18,18 0 0 1 62,62 Z" />
+        <path android:strokeColor="#FFFFFFFF" android:strokeWidth="15" android:strokeLineCap="round"
+            android:pathData="M128,182 V200 M94,206 H162" />
+        <path android:fillColor="#FFFFFFFF" android:strokeColor="#FFFFFFFF" android:strokeWidth="4"
+            android:strokeLineJoin="round"
+            android:pathData="M110,86 L110,152 L126,137 L138,163 L150,157.5 L138,132 L160,132 Z" />
+        <path android:fillColor="#FFFFFFFF"
+            android:pathData="M206,38 A20,20 0 1 1 205.99,38 Z" />
+    </group>
+</vector>
