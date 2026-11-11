@@ -382,8 +382,12 @@ func (z *ztManager) androidStep(ctx context.Context, cfg Config, ch *rendezvous.
 	}
 	node := cfg.ZTNode
 	step := "Установите приложение ZeroTier One, добавьте в нём сеть " + nwid + " и введите ниже номер узла (Node ID) из приложения."
+	online := false
+	if a := z.n.getLink(); a != nil && a.Online() {
+		online = true // уже на связи с главным ПК — заявки не нужны
+	}
 	if zt.ValidNodeID(node) {
-		if time.Since(*lastJoinReq) > 3*time.Minute {
+		if !online && time.Since(*lastJoinReq) > 3*time.Minute {
 			if err := ch.Publish(ctx, rendezvous.Msg{Type: "join", Network: nwid, Node: node, Host: hostname(), Machine: cfg.Machine}); err != nil {
 				return fmt.Errorf("точка встречи: %w", err)
 			}
