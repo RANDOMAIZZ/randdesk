@@ -194,6 +194,9 @@ func (l *limitedBuf) Write(p []byte) (int, error) {
 
 // unixShell — оболочка для команд: «powershell» и «cmd» из интерфейса на Linux означают bash/sh.
 func unixShell(shell string) string {
+	if _, err := os.Stat("/bin/sh"); err != nil { // Android: оболочка лежит в /system/bin
+		return "/system/bin/sh"
+	}
 	if shell == "sh" {
 		return "/bin/sh"
 	}

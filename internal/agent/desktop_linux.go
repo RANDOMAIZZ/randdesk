@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"randsec/internal/android"
 	"randsec/internal/desktop"
 	"randsec/internal/evdev"
 	"randsec/internal/session"
@@ -135,7 +136,12 @@ func startHelper(args []string) (*helperProc, error) {
 }
 
 func startDesktopHelper(cfgPath, session, hub, indicator string) error {
-	_, err := startHelper([]string{"agent", "desktop-helper", "-config", cfgPath, "-session", session, "-hub", hub, "-indicator", indicator})
+	args := []string{"agent", "desktop-helper", "-config", cfgPath, "-session", session, "-hub", hub, "-indicator", indicator}
+	if android.On() { // на телефоне X11 нет: экран показывает само приложение Android
+		_, err := startHelperOrPlain(args, false)
+		return err
+	}
+	_, err := startHelper(args)
 	return err
 }
 

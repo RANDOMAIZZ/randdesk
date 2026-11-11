@@ -108,6 +108,7 @@
   const fmtTime = (iso) => new Date(iso).toLocaleString('ru-RU');
   const level = (p) => (p >= 90 ? 'bad' : p >= 75 ? 'warn' : '');
   const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const fmtBattery = (b) => (b ? `${b.charging ? '⚡' : '🔋'} ${b.level}%${b.charging ? ' · заряжается' : ''}${b.temp ? ` · ${b.temp.toFixed(0)} °C` : ''}` : '');
   const shortOS = (info) => (info && info.platform ? info.platform.replace(/^Microsoft\s+/i, '') : '');
   const primaryIP = (d) => {
     for (const n of (d.info && d.info.nics) || []) for (const ip of n.ips || []) if (!ip.startsWith('169.254.')) return ip;
@@ -293,11 +294,28 @@
       try { await api('POST', '/api/node/connect', { address: addr.value }); toast('Подключено', 'ok'); } catch (ex) { err.textContent = ex.message; } finally { btn.disabled = false; }
     } }, h('p', { class: 'muted small' }, 'Главный ПК в другой сети (через интернет)? Введите его внешний адрес — он есть в настройках главного ПК:'),
       h('div', { class: 'row' }, addr, btn));
+    // телефон: сеть через интернет — через приложение ZeroTier One
+    const ztNet = h('code', { class: 'cmd' }, '…');
+    const ztNode = h('input', { type: 'text', placeholder: 'Node ID, например 8056c2e21c', maxlength: '10', autocapitalize: 'off', spellcheck: 'false' });
+    const ztSave = h('button', { class: 'btn sm', type: 'submit' }, 'Сохранить');
+    const ztErr = h('div', { class: 'form-err' });
+    let ztNodeSet = false;
+    const ztBox = h('form', { class: 'manual', hidden: true, onsubmit: async (e) => {
+      e.preventDefault(); ztErr.textContent = ''; ztSave.disabled = true;
+      try { await api('POST', '/api/node/ztnode', { node: ztNode.value }); toast('Номер узла сохранён — отправляю заявку главному ПК', 'ok'); } catch (ex) { ztErr.textContent = ex.message; } finally { ztSave.disabled = false; }
+    } },
+      h('p', { class: 'muted small' }, 'Нет общей сети Wi-Fi с главным ПК? Подключитесь через интернет:'),
+      h('ol', { class: 'muted small steps' },
+        h('li', null, 'Установите приложение ', h('a', { href: 'https://play.google.com/store/apps/details?id=com.zerotier.one', target: '_blank' }, 'ZeroTier One'), ' (бесплатно).'),
+        h('li', null, 'В приложении нажмите «+» и добавьте сеть:', h('div', { class: 'cmd-wrap' }, ztNet, h('button', { class: 'btn sm', type: 'button', onclick: () => copyText(ztNet.textContent) }, 'Копировать'))),
+        h('li', null, 'Скопируйте из приложения «Node ID» (вверху экрана) и вставьте сюда:')),
+      h('div', { class: 'row' }, ztNode, ztSave), ztErr,
+      h('p', { class: 'muted small' }, 'Android разрешает только один VPN сразу: если включён другой VPN, на время выключите его.'));
     root.replaceChildren(h('div', { class: 'auth' }, themeFloat(), h('div', { class: 'auth-card' },
       h('div', { class: 'brand big' }, logo(), h('span', null, 'RANDSEC')),
       h('div', { class: 'spinner' }), status, err,
       h('p', { class: 'muted small' }, 'Убедитесь, что главный ПК включён и на нём RANDSEC настроен с тем же логином и паролем. ПК в одной сети (или в Radmin VPN) найдут друг друга сами.'),
-      manual,
+      ztBox, manual,
       h('button', { class: 'btn sm ghost', style: { marginTop: '10px' }, onclick: async () => {
         if (!await confirmDlg('Изменить логин и пароль?', 'Этот ПК вернётся к первой настройке, и вы сможете ввести логин и пароль заново.', 'Изменить')) return;
         try {
@@ -311,8 +329,11 @@
       try {
         const s = await api('GET', '/api/node/status');
         const zt = s.zt || {};
+        ztBox.hidden = !zt.android || !zt.network;
+        if (zt.network) ztNet.textContent = zt.network;
+        if (zt.node && !ztNodeSet && document.activeElement !== ztNode) { ztNode.value = zt.node; ztNodeSet = true; }
         status.textContent = s.online ? 'Подключено к главному ПК ' + (s.admin || '')
-          : zt.step ? 'Поиск главного ПК… ' + zt.step
+          : zt.step && !zt.android ? 'Поиск главного ПК… ' + zt.step
           : zt.status === 'OK' ? 'Поиск главного ПК… (сеть через интернет подключена)'
           : (s.status || 'Поиск главного ПК…');
         if (s.error && !s.online) err.textContent = s.error === 'на главном ПК другой логин или пароль' ? 'Главный ПК найден, но логин или пароль не совпадают.' : s.error;
@@ -589,6 +610,7 @@
           meter('Память', pct(st.mem_used, st.mem_total), `${fmtBytes(st.mem_used)} / ${fmtBytes(st.mem_total)}`),
           sysDisk ? meter('Диск ' + sysDisk.mount.replace(/\\$/, ''), pct(sysDisk.used, sysDisk.total), `${fmtBytes(sysDisk.used)} / ${fmtBytes(sysDisk.total)}`) : null,
           h('div', { class: 'dev-net muted small' }, h('span', null, `↓ ${fmtRate(st.net_rx)}`), h('span', null, `↑ ${fmtRate(st.net_tx)}`),
+            st.battery ? h('span', { class: st.battery.level <= 15 && !st.battery.charging ? 'bad-text' : '' }, fmtBattery(st.battery)) : null,
             h('span', { class: 'right' }, 'аптайм ' + fmtUptime(st.uptime))))
         : h('div', { class: 'dev-offline muted small' }, d.online ? 'Получение данных…' : 'Не в сети · последний раз ' + fmtAgo(d.last_seen)),
       h('div', { class: 'dev-actions' },
@@ -788,6 +810,7 @@
         cell('Ядра / потоки', i.cpu_cores ? `${i.cpu_cores} / ${i.cpu_threads}` : '—'),
         cell('Оперативная память', fmtBytes(i.mem_total)),
         cell('Время работы', st ? fmtUptime(st.uptime) : '—'),
+        ...(st && st.battery ? [cell('Батарея', fmtBattery(st.battery))] : []),
         cell('Процессов', st ? st.procs : '—'),
         cell('Агент', `v${i.agent_version || '?'}${i.agent_user ? ' · ' + i.agent_user : ''}`),
         cell('Последний IP (для хаба)', d.last_ip || '—'));
@@ -924,9 +947,18 @@
     let recording = false;
     const fsBtn = h('button', { class: 'btn sm', title: 'Во весь экран (Win и Alt+Tab тоже уходят на удалённый ПК)' }, 'Во весь экран');
     const pasteBtn = h('button', { class: 'btn sm', title: 'Набрать текст на удалённом ПК' }, 'Вставить текст');
+    // экранная клавиатура телефона: скрытое поле, всё набранное уходит на удалённый ПК
+    const kbInput = h('input', { class: 'rd-kb', type: 'text', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', 'aria-hidden': 'true' });
+    const kbBtn = h('button', { class: 'btn sm rd-touch-only', title: 'Экранная клавиатура' }, '⌨ Клавиатура');
+    const zoomBtn = h('button', { class: 'btn sm', hidden: true, title: 'Вернуть обычный масштаб' }, '1:1');
+    // рабочий стол телефона: кнопки Android вместо сочетаний клавиш Windows
+    const isPhone = !!(dev.info && dev.info.os === 'android');
+    const andKey = (code) => () => { if (ws && ws.readyState === 1 && !viewOnly.checked) { send({ t: 'kd', c: code, k: 0 }); send({ t: 'ku', c: code, k: 0 }); } canvas.focus(); };
+    const andBtns = [['◁ Назад', 'AndroidBack'], ['○ Домой', 'AndroidHome'], ['▢ Недавние', 'AndroidRecents'], ['Шторка', 'AndroidNotifications'], ['Питание', 'AndroidPower']]
+      .map(([l, c]) => h('button', { class: 'btn sm', onclick: andKey(c) }, l));
     const reBtn = h('button', { class: 'btn sm ghost' }, 'Переподключить');
     body.append(
-      h('div', { class: 'toolbar' }, profSel, monSel, qSel, scaleSel, fpsSel, codecSel, keysSel, pasteBtn, fsBtn, reBtn),
+      h('div', { class: 'toolbar' }, profSel, ...(isPhone ? [] : [monSel]), qSel, scaleSel, fpsSel, ...(isPhone ? andBtns : [codecSel, keysSel]), pasteBtn, kbBtn, zoomBtn, fsBtn, reBtn, kbInput),
       h('div', { class: 'toolbar' }, h('label', { class: 'inline' }, fitBox, 'вписать в окно'), h('label', { class: 'inline' }, viewOnly, 'только просмотр'),
         h('label', { class: 'inline game-toggle', title: 'Для игр: мышь захватывается, движения передаются как от настоящей мыши' }, gameBox, '🎮 игровой режим'), gkBtn, sensSel, stats),
       view);
@@ -1017,6 +1049,8 @@
         codecInfo = m.codec === 'h264' ? 'H.264' + (m.encoder ? ' (' + m.encoder.replace(/ ?H\.?264 ?|Encoder|MFT/gi, ' ').replace(/\s+/g, ' ').trim() + ')' : '') : 'JPEG';
         if (m.codec !== 'h264') closeDecoder();
         if (m.reason && codecSel.value !== 'jpeg') toast('Видео H.264 недоступно на удалённом ПК, используется JPEG: ' + m.reason, 'bad');
+      } else if (m.type === 'android') {
+        if (!m.control) toast('Видно экран телефона, но управлять им нельзя: на телефоне включите «Настройки → Специальные возможности → RANDSEC: управление с ПК».', 'warn', 12000);
       } else if (m.type === 'error') { overlay.textContent = m.message; overlay.hidden = false; }
     }
 
@@ -1107,8 +1141,9 @@
     };
     const rawMoves = 'onpointerrawupdate' in canvas; // самый частый поток движений (Chrome/Edge)
     canvas.addEventListener(rawMoves ? 'pointerrawupdate' : 'pointermove', moveRel);
-    canvas.addEventListener('pointermove', (e) => { if (!locked() && active()) send({ t: 'mm', ...pos(e) }); });
+    canvas.addEventListener('pointermove', (e) => { if (e.pointerType !== 'touch' && !locked() && active()) send({ t: 'mm', ...pos(e) }); });
     canvas.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'touch') return;
       canvas.focus();
       // в игровом режиме сначала захват мыши; привязку указателя (pointer capture) не включаем —
       // с ней браузер может отказать в захвате
@@ -1116,12 +1151,15 @@
       if (!locked() && !gameBox.checked) { try { canvas.setPointerCapture(e.pointerId); } catch {} }
     });
     canvas.addEventListener('mousedown', (e) => {
-      e.preventDefault(); canvas.focus();
+      e.preventDefault();
+      if (performance.now() - lastTouch < 800) return; // «мышь», которую браузер придумал из касания
+      canvas.focus();
       if (gameBox.checked && !locked()) return; // этот щелчок только захватывает мышь
       if (active()) send(locked() ? { t: 'md', b: e.button, r: true } : { t: 'md', b: e.button, ...pos(e) });
     });
     canvas.addEventListener('mouseup', (e) => {
       e.preventDefault();
+      if (performance.now() - lastTouch < 800) return;
       if (active()) send(locked() ? { t: 'mu', b: e.button, r: true } : { t: 'mu', b: e.button, ...pos(e) });
     });
     const onLock = () => {
@@ -1154,6 +1192,120 @@
       const k = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? 800 : 1;
       send({ t: 'wh', dy: Math.round(-e.deltaY * k * 1.2), dx: Math.round(e.deltaX * k * 1.2) });
     }, { passive: false });
+    // ---- сенсорный экран ----
+    // касание — щелчок; долгое касание — правая кнопка; двойное касание с удержанием — перетаскивание;
+    // два пальца — прокрутка
+    let lastTouch = -1e9, tStart = null, tTimer = 0, tDrag = false, lastTap = { t: -1e9, x: 0, y: 0 }, twoY = null, twoX = null;
+    // масштаб картинки: щипок двумя пальцами приближает, два пальца при приближении двигают картинку
+    let zoom = 1, zx = 0, zy = 0, pinch = null;
+    const applyZoom = () => {
+      const W0 = canvas.offsetWidth, H0 = canvas.offsetHeight;
+      if (zoom <= 1.01) { zoom = 1; zx = zy = 0; }
+      zx = Math.min(0, Math.max(W0 - W0 * zoom, zx));
+      zy = Math.min(0, Math.max(H0 - H0 * zoom, zy));
+      canvas.style.transformOrigin = '0 0';
+      canvas.style.transform = zoom === 1 ? '' : `translate(${zx}px, ${zy}px) scale(${zoom})`;
+      view.classList.toggle('zoomed', zoom > 1);
+      zoomBtn.hidden = zoom === 1;
+    };
+    zoomBtn.addEventListener('click', () => { zoom = 1; applyZoom(); canvas.focus(); });
+    const two = (e) => {
+      const a = e.touches[0], b = e.touches[1], r = canvas.getBoundingClientRect();
+      // точка относительно картинки без масштаба (transform-origin 0 0: сдвиг = zx, zy)
+      return { d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY),
+        x: (a.clientX + b.clientX) / 2 - (r.left - zx), y: (a.clientY + b.clientY) / 2 - (r.top - zy) };
+    };
+    const tp = (t) => pos({ clientX: t.clientX, clientY: t.clientY });
+    canvas.addEventListener('touchstart', (e) => {
+      e.preventDefault(); lastTouch = performance.now();
+      clearTimeout(tTimer);
+      if (e.touches.length >= 2) {
+        if (tDrag && active()) { send({ t: 'mu', b: 0, ...tp(e.touches[0]) }); tDrag = false; }
+        tStart = null;
+        twoY = (e.touches[0].clientY + e.touches[1].clientY) / 2; twoX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        const g = two(e);
+        pinch = { ...g, z0: zoom, x0: zx, y0: zy, mode: zoom > 1 ? 'zoom' : '' };
+        return;
+      }
+      if (!active()) return;
+      const t = e.touches[0], p = tp(t);
+      tStart = { x: t.clientX, y: t.clientY, p, time: performance.now(), moved: false, right: false };
+      send({ t: 'mm', ...p });
+      // второе касание сразу после первого — начинаем перетаскивание
+      if (performance.now() - lastTap.t < 350 && Math.hypot(t.clientX - lastTap.x, t.clientY - lastTap.y) < 30) {
+        tDrag = true; send({ t: 'md', b: 0, ...p });
+        return;
+      }
+      tTimer = setTimeout(() => {
+        if (tStart && !tStart.moved) { tStart.right = true; send({ t: 'md', b: 2, ...p }); send({ t: 'mu', b: 2, ...p }); if (navigator.vibrate) navigator.vibrate(20); }
+      }, 550);
+    }, { passive: false });
+    canvas.addEventListener('touchmove', (e) => {
+      e.preventDefault(); lastTouch = performance.now();
+      if (e.touches.length >= 2 && pinch) {
+        const g = two(e);
+        if (!pinch.mode) {
+          if (Math.abs(g.d - pinch.d) > 24) pinch.mode = 'zoom';
+          else if (Math.hypot(g.x - pinch.x, g.y - pinch.y) > 12) pinch.mode = 'scroll';
+        }
+        if (pinch.mode === 'zoom') {
+          zoom = Math.max(1, Math.min(6, pinch.z0 * g.d / Math.max(1, pinch.d)));
+          // точка под пальцами остаётся под пальцами
+          const px = (pinch.x - pinch.x0) / pinch.z0, py = (pinch.y - pinch.y0) / pinch.z0;
+          zx = g.x - px * zoom; zy = g.y - py * zoom;
+          applyZoom();
+          return;
+        }
+        if (pinch.mode !== 'scroll' || !active()) return;
+      }
+      if (!active()) return;
+      if (e.touches.length >= 2 && twoY != null) {
+        const y = (e.touches[0].clientY + e.touches[1].clientY) / 2, x = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        const dy = y - twoY, dx = x - twoX;
+        if (Math.abs(dy) >= 4 || Math.abs(dx) >= 4) { send({ t: 'wh', dy: Math.round(dy * 4), dx: Math.round(-dx * 4) }); twoY = y; twoX = x; }
+        return;
+      }
+      if (!tStart) return;
+      const t = e.touches[0];
+      if (Math.hypot(t.clientX - tStart.x, t.clientY - tStart.y) > 10) { tStart.moved = true; clearTimeout(tTimer); }
+      send({ t: 'mm', ...tp(t) });
+    }, { passive: false });
+    const touchEnd = (e) => {
+      e.preventDefault(); lastTouch = performance.now();
+      clearTimeout(tTimer);
+      if (e.touches.length < 2) pinch = null;
+      if (e.touches.length) return;
+      twoY = twoX = null;
+      const t = e.changedTouches[0];
+      if (!active() || !t) { tStart = null; tDrag = false; return; }
+      const p = tp(t);
+      if (tDrag) { send({ t: 'mu', b: 0, ...p }); tDrag = false; tStart = null; return; }
+      if (tStart && !tStart.moved && !tStart.right) {
+        send({ t: 'md', b: 0, ...p }); send({ t: 'mu', b: 0, ...p });
+        lastTap = { t: performance.now(), x: t.clientX, y: t.clientY };
+      }
+      tStart = null;
+    };
+    canvas.addEventListener('touchend', touchEnd, { passive: false });
+    canvas.addEventListener('touchcancel', touchEnd, { passive: false });
+    // экранная клавиатура: Android присылает keydown с кодом 229, поэтому смотрим на сам ввод
+    const tapKey = (code, k) => { send({ t: 'kd', c: code, k }); send({ t: 'ku', c: code, k }); };
+    // в поле всегда лежит пробел-«якорь»: так видно и Backspace, когда набирать уже нечего
+    const kbReset = () => { kbInput.value = ' '; try { kbInput.setSelectionRange(1, 1); } catch {} };
+    kbBtn.addEventListener('click', () => { kbReset(); kbInput.focus(); });
+    kbInput.addEventListener('input', () => {
+      const v = kbInput.value;
+      if (active()) {
+        if (!v.length) tapKey('Backspace', 8);
+        else if (v.length > 1) send({ t: 'text', s: v.startsWith(' ') ? v.slice(1) : v });
+      }
+      kbReset();
+    });
+    kbInput.addEventListener('keydown', (e) => {
+      const map = { Enter: 13, Backspace: 8, Tab: 9, Escape: 27, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Delete: 46 };
+      if (e.key in map && active()) { e.preventDefault(); tapKey(e.key === 'Enter' ? 'Enter' : e.code || e.key, map[e.key]); }
+    });
+
     // запись нового сочетания и переключение игрового режима — раньше, чем клавиши уйдут на удалённый ПК
     const isMod = (c) => /^(Control|Alt|Shift|Meta|OS)(Left|Right)?$/.test(c);
     const onKey = (e) => {
@@ -1194,8 +1346,10 @@
     canvas.addEventListener('keydown', (e) => {
       if (!active()) return;
       e.preventDefault();
+      // телефон: символы отправляем текстом (в нужной раскладке), служебные клавиши — кодами
+      if (isPhone && e.key && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) { send({ t: 'text', s: e.key }); return; }
       pressed.set(e.code, e.keyCode);
-      send({ t: 'kd', c: e.code, k: e.keyCode });
+      send({ t: 'kd', c: e.code, k: e.keyCode, key: e.key });
     });
     canvas.addEventListener('keyup', (e) => {
       if (!active()) return;

@@ -280,6 +280,8 @@ pre.recovery { background: var(--bg); border: 1px solid var(--border); border-ra
 .manual { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px; }
 .manual .row { display: flex; gap: 8px; }
 .manual .row input { flex: 1; min-width: 0; }
+.steps { margin: 6px 0 8px; padding-left: 20px; display: grid; gap: 6px; }
+.steps .cmd-wrap { margin-top: 4px; }
 .input-card { margin-bottom: 14px; }
 .switches { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
 .switch-row { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
@@ -497,6 +499,11 @@ input, select, textarea { transition: border-color .15s, box-shadow .2s, backgro
 .btn.danger-ghost.active { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); color: var(--bad); }
 /* полный экран: картинка всегда по центру и вписана с сохранением пропорций */
 .rd-view { position: relative; }
+.rd-view canvas { touch-action: none; }
+.rd-view.zoomed, .rd-view.zoomed .rd-stage { overflow: hidden; }
+.rd-kb { position: fixed; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; pointer-events: none; }
+.rd-touch-only { display: none; }
+@media (pointer: coarse) { .rd-touch-only { display: inline-flex; } }
 .rd-view:fullscreen { background: #000; }
 .rd-view:fullscreen .rd-stage { display: block; height: 100vh; max-height: none; overflow: hidden; border: 0; border-radius: 0; background: #000; }
 .rd-view:fullscreen .rd-canvas { width: 100vw; height: 100vh; max-width: none; max-height: none; object-fit: contain; }

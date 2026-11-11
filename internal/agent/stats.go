@@ -2,6 +2,7 @@ package agent
 
 import (
 	"net"
+	"os"
 	"os/user"
 	"strings"
 	"time"
@@ -13,10 +14,19 @@ import (
 	gnet "github.com/shirou/gopsutil/v4/net"
 	"github.com/shirou/gopsutil/v4/process"
 
+	"randsec/internal/android"
 	"randsec/internal/proto"
 )
 
 type statsCollector struct {
+	// Android: загрузка по времени простоя ядер и трафик из сведений приложения
+	idlePrev    uint64
+	idleCores   int
+	idleT       time.Time
+	aRx, aTx    uint64
+	aT          int64
+	lastNetRate [2]float64
+
 	lastRx, lastTx uint64
 	lastNetT       time.Time
 	disks          []proto.Disk
@@ -36,7 +46,9 @@ func (c *statsCollector) collect() proto.Stats {
 	if vm, err := mem.VirtualMemory(); err == nil {
 		st.MemUsed, st.MemTotal = vm.Used, vm.Total
 	}
-	if n, err := gnet.IOCounters(false); err == nil && len(n) > 0 {
+	if android.On() {
+		// трафик и память телефона — в androidStats: системные счётчики приложениям закрыты
+	} else if n, err := gnet.IOCounters(false); err == nil && len(n) > 0 {
 		now := time.Now()
 		rx, tx := n[0].BytesRecv, n[0].BytesSent
 		if !c.lastNetT.IsZero() {
@@ -62,10 +74,19 @@ func (c *statsCollector) collect() proto.Stats {
 	if pids, err := process.Pids(); err == nil {
 		st.Procs = len(pids)
 	}
+	if android.On() {
+		c.androidStats(&st)
+	}
 	return st
 }
 
 func collectDisks() []proto.Disk {
+	if android.On() { // разделы Android приложению не видны — показываем память телефона
+		if u, err := disk.Usage(os.Getenv("HOME")); err == nil && u.Total > 0 {
+			return []proto.Disk{{Mount: "Память", FS: "", Used: u.Used, Total: u.Total}}
+		}
+		return nil
+	}
 	parts, err := disk.Partitions(false)
 	if err != nil {
 		return nil
@@ -102,6 +123,14 @@ func collectSysInfo() proto.SysInfo {
 	if u, err := user.Current(); err == nil {
 		info.AgentUser = u.Username
 	}
+	if android.On() {
+		info.Hostname = android.Hostname()
+		info.OS = "android"
+		if ai := android.ReadInfo(); ai != nil {
+			info.Platform = strings.TrimSpace(ai.Manufacturer + " " + ai.Model)
+			info.PlatformVersion = "Android " + ai.Android
+		}
+	}
 	ifs, _ := net.Interfaces()
 	for _, ifc := range ifs {
 		if ifc.Flags&net.FlagLoopback != 0 || len(ifc.HardwareAddr) != 6 {
@@ -117,4 +146,33 @@ func collectSysInfo() proto.SysInfo {
 		info.NICs = append(info.NICs, nic)
 	}
 	return info
+}
+
+func (c *statsCollector) androidStats(st *proto.Stats) {
+	if idle, cores := android.CPUIdle(); cores > 0 {
+		now := time.Now()
+		if !c.idleT.IsZero() && cores == c.idleCores && idle >= c.idlePrev {
+			if total := float64(now.Sub(c.idleT).Microseconds()) * float64(cores); total > 0 {
+				st.CPU = max(0, min(100, 100*(1-float64(idle-c.idlePrev)/total)))
+			}
+		}
+		c.idlePrev, c.idleCores, c.idleT = idle, cores, now
+	}
+	ai := android.ReadInfo()
+	if ai == nil {
+		return
+	}
+	if ai.Battery >= 0 {
+		st.Battery = &proto.Battery{Level: ai.Battery, Charging: ai.Charging, Temp: ai.Temp}
+	}
+	if ai.T > c.aT && c.aT > 0 && ai.Rx >= c.aRx && ai.Tx >= c.aTx {
+		dt := float64(ai.T-c.aT) / 1000
+		st.NetRx, st.NetTx = float64(ai.Rx-c.aRx)/dt, float64(ai.Tx-c.aTx)/dt
+		c.lastNetRate = [2]float64{st.NetRx, st.NetTx}
+	} else if ai.T == c.aT {
+		st.NetRx, st.NetTx = c.lastNetRate[0], c.lastNetRate[1] // приложение ещё не обновило счётчики
+	}
+	if ai.T != c.aT {
+		c.aRx, c.aTx, c.aT = ai.Rx, ai.Tx, ai.T
+	}
 }

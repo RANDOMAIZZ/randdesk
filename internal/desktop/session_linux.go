@@ -17,6 +17,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kbinani/screenshot"
 
+	"randsec/internal/android"
 	"randsec/internal/x11"
 )
 
@@ -37,7 +38,8 @@ type clientMsg struct {
 	FPS   int     `json:"fps"`
 	Mon   *int    `json:"mon"`
 	Scale int     `json:"scale"`
-	R     bool    `json:"r"` // игровой режим: кнопки без перемещения курсора в точку
+	R     bool    `json:"r"`   // игровой режим: кнопки без перемещения курсора в точку
+	Key   string  `json:"key"` // символ клавиши в раскладке браузера (для телефона)
 }
 
 type monitor struct {
@@ -95,6 +97,9 @@ func SetIndicatorPos(string) {}
 
 // Serve обслуживает один сеанс удалённого рабочего стола до закрытия соединения.
 func Serve(ws *websocket.Conn) error {
+	if android.On() {
+		return serveAndroid(ws)
+	}
 	in, err := x11.OpenInput()
 	if err != nil {
 		msg := "нет доступа к рабочему столу X11: " + err.Error()

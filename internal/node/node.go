@@ -22,6 +22,7 @@ import (
 	"randsec/internal/hub"
 	"randsec/internal/pair"
 	"randsec/internal/proto"
+	"randsec/internal/zt"
 	"randsec/web"
 )
 
@@ -337,6 +338,7 @@ func (n *node) runMember(parent <-chan struct{}) error {
 	n.setStatus("Поиск главного ПК…", "")
 	n.startLink(stop)
 	go n.zt.runMember(stop)
+	go n.dialZTHubs(stop)
 	acc := n.st.get().Account
 	var lastTry sync.Map
 	go seeker(stop, n.o.UDPPort, acc.Group, loginHash(acc.Login),
@@ -391,6 +393,21 @@ func (n *node) memberHandler(stop <-chan struct{}, reset func()) http.Handler {
 		go func() { time.Sleep(300 * time.Millisecond); reset() }()
 	})
 	static := http.FileServer(http.FS(web.FS()))
+	mux.HandleFunc("POST /api/node/ztnode", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Node string }
+		json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req)
+		node := strings.ToLower(strings.TrimSpace(req.Node))
+		if node != "" && !zt.ValidNodeID(node) {
+			writeJSON(w, 400, map[string]string{"error": "номер узла ZeroTier — 10 символов 0-9 и a-f, например 8056c2e21c"})
+			return
+		}
+		if err := n.st.set(func(c *Config) { c.ZTNode = node }); err != nil {
+			writeJSON(w, 500, map[string]string{"error": err.Error()})
+			return
+		}
+		n.zt.refresh()
+		writeJSON(w, 200, map[string]any{"ok": true})
+	})
 	mux.HandleFunc("GET /api/node/status", func(w http.ResponseWriter, r *http.Request) {
 		n.mu.Lock()
 		resp := map[string]any{"status": n.status, "error": n.lastErr, "admin": n.admin, "login": n.st.get().Account.Login}
@@ -482,4 +499,29 @@ func (d *dynTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	t := d.t
 	d.mu.Unlock()
 	return t.RoundTrip(r)
+}
+
+// dialZTHubs подключает этот ПК к главному по его адресам в сети ZeroTier, полученным через
+// точку встречи, — когда широковещательный поиск не работает (телефон с приложением ZeroTier One).
+func (n *node) dialZTHubs(stop <-chan struct{}) {
+	t := time.NewTicker(15 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+		}
+		urls := n.zt.HubURLs()
+		if len(urls) == 0 {
+			continue
+		}
+		if a := n.getLink(); a != nil {
+			a.AddHubs(urls...)
+			continue
+		}
+		if u := firstReachable(urls); u != "" {
+			n.tryPair(stop, u, "")
+		}
+	}
 }

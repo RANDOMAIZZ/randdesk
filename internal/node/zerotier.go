@@ -5,10 +5,13 @@ import (
 	"crypto/rand"
 	"fmt"
 	"log"
+	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"randsec/internal/android"
 	"randsec/internal/rendezvous"
 	"randsec/internal/ui"
 	"randsec/internal/zt"
@@ -30,15 +33,40 @@ type ZTStatus struct {
 	Addresses []string  `json:"addresses"`
 	Members   int       `json:"members"` // участников (главный ПК)
 	Step      string    `json:"step"`
+	Android   bool      `json:"android,omitempty"` // ZeroTier ставится отдельным приложением
 	Error     string    `json:"error,omitempty"`
 	Updated   time.Time `json:"updated"`
 }
 
 type ztManager struct {
-	n    *node
-	mu   sync.Mutex
-	st   ZTStatus
-	kick chan struct{}
+	n        *node
+	mu       sync.Mutex
+	st       ZTStatus
+	kick     chan struct{}
+	hubAddrs []string // адреса хаба в сети ZeroTier из последнего сообщения главного ПК
+	pubAddrs string   // главный ПК: какие адреса уже опубликованы
+}
+
+// HubURLs — адреса хаба главного ПК в сети ZeroTier, известные из точки встречи.
+func (z *ztManager) HubURLs() []string {
+	z.mu.Lock()
+	defer z.mu.Unlock()
+	return append([]string(nil), z.hubAddrs...)
+}
+
+// ztHubURLs превращает адреса узла в сети («10.147.17.5/24») в адреса хаба.
+func ztHubURLs(assigned []string, port int) []string {
+	var out []string
+	for _, a := range assigned {
+		ip := a
+		if i := strings.IndexByte(ip, '/'); i >= 0 {
+			ip = ip[:i]
+		}
+		if p := net.ParseIP(ip); p != nil && p.To4() != nil {
+			out = append(out, "https://"+net.JoinHostPort(ip, strconv.Itoa(port)))
+		}
+	}
+	return out
 }
 
 func newZT(n *node) *ztManager { return &ztManager{n: n, kick: make(chan struct{}, 1)} }
@@ -193,13 +221,21 @@ func (z *ztManager) adminStep(ctx context.Context, cfg Config, lastPublish *time
 		*subCancel = cancel
 		go z.listenJoins(sctx, stop, ch, l, nwid)
 	}
-	if time.Since(*lastPublish) > time.Hour {
-		if err := ch.Publish(ctx, rendezvous.Msg{Type: "net", Network: nwid, Host: hostname()}); err != nil {
+	nw, _ := l.Network(ctx, nwid)
+	addrs := ztHubURLs(nw.AssignedAddresses, z.n.o.Port)
+	z.mu.Lock()
+	changed := strings.Join(addrs, " ") != z.pubAddrs
+	z.mu.Unlock()
+	if time.Since(*lastPublish) > time.Hour || (changed && len(addrs) > 0) {
+		if err := ch.Publish(ctx, rendezvous.Msg{Type: "net", Network: nwid, Host: hostname(), Addrs: addrs}); err != nil {
 			return fmt.Errorf("точка встречи: %w", err)
 		}
 		*lastPublish = time.Now()
+		z.mu.Lock()
+		z.pubAddrs = strings.Join(addrs, " ")
+		z.mu.Unlock()
 	}
-	net, _ := l.Network(ctx, nwid)
+	net := nw
 	members, _ := l.ControllerMembers(ctx, nwid)
 	z.set(func(s *ZTStatus) {
 		s.Enabled, s.Network, s.Node, s.Status, s.Addresses = true, nwid, node, net.Status, net.AssignedAddresses
@@ -286,6 +322,9 @@ func (z *ztManager) memberStep(ctx context.Context, cfg Config, lastJoinReq *tim
 		for _, m := range list {
 			if m.Type == "net" && zt.ValidNetworkID(m.Network) && m.TS >= newest {
 				nwid, newest = m.Network, m.TS
+				z.mu.Lock()
+				z.hubAddrs = m.Addrs
+				z.mu.Unlock()
 			}
 		}
 	} else if nwid == "" {
@@ -296,6 +335,9 @@ func (z *ztManager) memberStep(ctx context.Context, cfg Config, lastJoinReq *tim
 			s.Step = "Главный ПК ещё не включил сеть через интернет"
 		})
 		return nil
+	}
+	if android.On() {
+		return z.androidStep(ctx, cfg, ch, nwid, lastJoinReq)
 	}
 	l, node, err := z.local(ctx)
 	if err != nil {
@@ -326,6 +368,32 @@ func (z *ztManager) memberStep(ctx context.Context, cfg Config, lastJoinReq *tim
 	}
 	z.set(func(s *ZTStatus) {
 		s.Enabled, s.Network, s.Node, s.Status, s.Addresses, s.Error, s.Step = true, nwid, node, net.Status, net.AssignedAddresses, "", step
+	})
+	return nil
+}
+
+// androidStep — сеть через интернет на телефоне. RANDSEC не может поставить ZeroTier сам:
+// пользователь ставит приложение ZeroTier One, добавляет в нём сеть главного ПК и вводит
+// здесь номер своего узла, а этот ПК отправляет за него зашифрованную заявку на вступление.
+func (z *ztManager) androidStep(ctx context.Context, cfg Config, ch *rendezvous.Channel, nwid string, lastJoinReq *time.Time) error {
+	if nwid != cfg.ZTNetwork {
+		z.n.st.set(func(c *Config) { c.ZTNetwork = nwid })
+		*lastJoinReq = time.Time{}
+	}
+	node := cfg.ZTNode
+	step := "Установите приложение ZeroTier One, добавьте в нём сеть " + nwid + " и введите ниже номер узла (Node ID) из приложения."
+	if zt.ValidNodeID(node) {
+		if time.Since(*lastJoinReq) > 3*time.Minute {
+			if err := ch.Publish(ctx, rendezvous.Msg{Type: "join", Network: nwid, Node: node, Host: hostname(), Machine: cfg.Machine}); err != nil {
+				return fmt.Errorf("точка встречи: %w", err)
+			}
+			*lastJoinReq = time.Now()
+			log.Printf("ZeroTier: отправлена заявка на вступление узла %s (приложение ZeroTier One)", node)
+		}
+		step = "Заявка отправлена — главный ПК пустит телефон в сеть " + nwid + ". Включите эту сеть в приложении ZeroTier One."
+	}
+	z.set(func(s *ZTStatus) {
+		s.Enabled, s.Android, s.Network, s.Node, s.Error, s.Step = true, true, nwid, node, "", step
 	})
 	return nil
 }

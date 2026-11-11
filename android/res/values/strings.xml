@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="control_label">RANDSEC: управление с ПК</string>
+    <string name="control_desc">Позволяет управлять этим телефоном с ваших ПК через RANDSEC: касания, свайпы, кнопки «Назад» и «Домой», ввод текста. Работает, только пока ПК показывает экран телефона, и только после вашего разрешения показа экрана.</string>
+</resources>

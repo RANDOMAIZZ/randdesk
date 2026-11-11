@@ -33,7 +33,10 @@ type Msg struct {
 	Node    string `json:"node,omitempty"` // ID узла ZeroTier вступающего ПК
 	Host    string `json:"host,omitempty"`
 	Machine string `json:"machine,omitempty"`
-	TS      int64  `json:"ts"`
+	// адреса хаба главного ПК в сети ZeroTier (https://10.147.…:8420) — по ним подключаются
+	// устройства, которые вступили в сеть сами, через приложение ZeroTier (Android)
+	Addrs []string `json:"addrs,omitempty"`
+	TS    int64    `json:"ts"`
 }
 
 // Channel — зашифрованный канал учётной записи.

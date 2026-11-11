@@ -6,11 +6,12 @@ import (
 	"encoding/json"
 	"log"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"randsec/internal/android"
 )
 
 // Поиск главного ПК в локальной сети (и в VPN вроде Radmin, где работает широковещание).
@@ -284,7 +285,4 @@ func loginHash(login string) string {
 	return hex.EncodeToString(s[:8])
 }
 
-func hostname() string {
-	h, _ := os.Hostname()
-	return h
-}
+func hostname() string { return android.Hostname() }

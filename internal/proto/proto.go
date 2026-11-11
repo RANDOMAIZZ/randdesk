@@ -54,15 +54,22 @@ type Disk struct {
 }
 
 type Stats struct {
-	Time     int64   `json:"t"` // unix ms (проставляет хаб)
-	CPU      float64 `json:"cpu"`
-	MemUsed  uint64  `json:"mem_used"`
-	MemTotal uint64  `json:"mem_total"`
-	Disks    []Disk  `json:"disks"`
-	NetRx    float64 `json:"net_rx"` // байт/с
-	NetTx    float64 `json:"net_tx"` // байт/с
-	Uptime   uint64  `json:"uptime"` // секунды
-	Procs    int     `json:"procs"`
+	Time     int64    `json:"t"` // unix ms (проставляет хаб)
+	CPU      float64  `json:"cpu"`
+	MemUsed  uint64   `json:"mem_used"`
+	MemTotal uint64   `json:"mem_total"`
+	Disks    []Disk   `json:"disks"`
+	NetRx    float64  `json:"net_rx"` // байт/с
+	NetTx    float64  `json:"net_tx"` // байт/с
+	Uptime   uint64   `json:"uptime"` // секунды
+	Procs    int      `json:"procs"`
+	Battery  *Battery `json:"battery,omitempty"` // телефоны и ноутбуки
+}
+
+type Battery struct {
+	Level    int     `json:"level"` // 0..100
+	Charging bool    `json:"charging"`
+	Temp     float64 `json:"temp,omitempty"` // °C
 }
 
 type Proc struct {

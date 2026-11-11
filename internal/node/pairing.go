@@ -13,7 +13,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -51,7 +50,7 @@ func pairWith(hubURL string, acc pair.Account, machine string) (*agent.Config, s
 	if err != nil {
 		return nil, "", err
 	}
-	host, _ := os.Hostname()
+	host := hostname()
 	nb := make([]byte, 16)
 	rand.Read(nb)
 	req := pair.Request{Group: acc.Group, Machine: machine, Host: host, Nonce: hex.EncodeToString(nb), TS: time.Now().Unix(), FP: fp}
